@@ -1,0 +1,27 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - --cuda-host-only
+  Remove:
+    - -W*
+  Compiler: cl.exe
+  Target: x86_64-pc-windows-msvc
+
+Index:
+  Background: yes
+  RemapFiles: true
+
+Diagnostics:
+  ClangTidy:
+    Add: [modernize-*, cppcoreguidelines-*]
+    Remove: [modernize-use-trailing-return-type]
+  UnusedIncludes: Strict
+
+Completion:
+  EnableIncludePathCompletion: true
+  ClangTidyProfiling: true
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes

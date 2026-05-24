@@ -1,0 +1,206 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "myTasks CMake configure debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "-S",
+                "${workspaceFolder}",
+                "--preset",
+                "VS2022_win64_cfg_preset"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "my Configure the project in debug mode",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "label": "myTasks CMake configure release",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "-S",
+                "${workspaceFolder}",
+                "--preset",
+                "VS2022_win64_cfg_preset"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "my Configure the project in release mode",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "label": "myTasks CMake build debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "--config",
+                "Debug"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "Build the project in debug mode",
+            "dependsOn": "myTasks CMake configure debug",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "label": "myTasks CMake build release",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "--config",
+                "Release"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "Build the project in release mode",
+            "dependsOn": "myTasks CMake configure release",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        },
+        {
+            "label": "myTasks CMake install debug",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--install",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "--config",
+                "Debug",
+                "--prefix",
+                "${workspaceFolder}/install/VS2022_win64_cfg_preset"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "dependsOn": "myTasks CMake build debug"
+        },
+        {
+            "label": "myTasks CMake install release",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--install",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "--config",
+                "Release",
+                "--prefix",
+                "${workspaceFolder}/install/VS2022_win64_cfg_preset"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "dependsOn": "myTasks CMake build release"
+        },
+        {
+            "label": "myTasks CMake install debug/release",
+            "type": "shell",
+            "command": "echo",
+            "args": [
+                "Installing both Debug and Release configurations"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "myTasks CMake install debug",
+                "myTasks CMake install release"
+            ],
+            "detail": "Install both Debug and Release configurations"
+        },
+        {
+            "label": "myTasks Build with CMake",
+            "type": "shell",
+            "command": "cmake --build ${workspaceFolder}/build/VS2022_win64_cfg_preset --config Debug",
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        },
+        {
+            "label": "_ cmake configure",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-B",
+                "${workspaceFolder}/build/VS2022_win64_cfg_preset",
+                "-S",
+                "${workspaceFolder}",
+                "--preset",
+                "VS2022_win64_cfg_preset"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": [],
+            "detail": "Configure the project using preset",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            }
+        }
+    ]
+}

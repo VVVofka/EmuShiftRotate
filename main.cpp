@@ -1,0 +1,378 @@
+#include <assert.h>
+#include <vector>
+
+struct int2 {
+  int x, y;
+};
+struct float2 {
+  float x, y;
+};
+struct dim3 {
+  unsigned x, y, z;
+  dim3(unsigned a = 1, unsigned b = 1, unsigned c = 1) { x = a, y = b, z = c; }
+};
+
+using std::vector;
+typedef vector<uint64_t> u64vector;
+
+constexpr float sqrt2 = 1.41421356237f;
+constexpr float half_sqrt2 = sqrt2 * 0.5f;
+
+int2 wrap_toroid(int2 val, int sz) {
+  if(val.x < 0)
+    val.x += sz;
+  if(val.x >= sz)
+    val.x -= sz;
+  if(val.y < 0)
+    val.y += sz;
+  if(val.y >= sz)
+    val.y -= sz;
+  return val;
+} // --------------------------------------------------------------------------
+int2 wrap_toroid0(int2 val, int sz) {
+  int sz2 = sz / 2;
+  if(val.x < -sz2)
+    val.x += sz;
+  if(val.x >= sz2)
+    val.x -= sz;
+  if(val.y < -sz2)
+    val.y += sz;
+  if(val.y >= sz2)
+    val.y -= sz;
+  return val;
+} // --------------------------------------------------------------------------
+int __float2int_rn(float f) {
+  return int(roundf(f));
+} // --------------------------------------------------------------------------
+int2 rotate_device(int x, int y, float2 d_rotates) {
+  // Step 1: Horizontal shear
+  int idx1 = __float2int_rn(d_rotates.x * y);
+  int2 fld0 = {x + idx1, y};
+
+  // Step 2: Vertical shear
+  int idy2 = __float2int_rn(d_rotates.y * fld0.x);
+  int2 fld1 = {fld0.x, fld0.y + idy2};
+
+  // Step 3: Horizontal shear
+  int idx3 = __float2int_rn(d_rotates.x * fld1.y);
+  int2 fld2 = {fld1.x + idx3, fld1.y};
+
+  return fld2;
+} // --------------------------------------------------------------------------
+int2 rotate_device(int2 pos, float2 d_rotates) {
+  return rotate_device(pos.x, pos.y, d_rotates);
+} // --------------------------------------------------------------------------
+uint32_t part1by1_32(uint32_t x) {
+  x &= 0x0000FFFF;
+  x = (x | (x << 8)) & 0x00FF00FF;
+  x = (x | (x << 4)) & 0x0F0F0F0F;
+  x = (x | (x << 2)) & 0x33333333;
+  x = (x | (x << 1)) & 0x55555555;
+  return x;
+} // --------------------------------------------------------------------------
+uint32_t morton_encode(int2 i2) {
+  return part1by1_32((uint32_t)i2.x) | (part1by1_32((uint32_t)i2.y) << 1);
+} // --------------------------------------------------------------------------
+void replace_bit(uint64_t &val, uint32_t idx_bit, uint32_t val_bit) {
+  val = (val & ~(1ull << idx_bit)) | (uint64_t(val_bit) << idx_bit);
+} // --------------------------------------------------------------------------
+int sum1(const u64vector &v) {
+  int sum = 0;
+  for(int i = 0; i < v.size(); ++i)
+    for(int j = 0; j < 64; ++j)
+      sum += int((v[i] >> j) & 1ULL);
+  return sum;
+} // --------------------------------------------------------------------------
+float2 get_d_rotates(float angle_deg) {
+  constexpr float to_rad = 3.14159265358979f / 180.0f;
+  float angle_rad = angle_deg * to_rad;
+  float x = tanf(angle_rad) * (1 - sqrt2); // 1, 3 шаг
+  float y = sinf(angle_rad * 2) / sqrt2;   // 2 шаг
+  return {x, y};
+} // --------------------------------------------------------------------------
+void dump(const u64vector &v) {
+  int wsz = int(sqrt(double(v.size())));
+  int sz = wsz * 8;
+  printf("sz=%d\n", sz);
+  for(int yr = 0; yr < sz; ++yr) {
+    int y = sz - 1 - yr;
+    int wy = y / 8;
+    unsigned shifty = y % 8;
+    if(shifty == 7 && yr)
+      printf("\n");
+    for(int x = 0; x < sz; ++x) {
+      int wx = x / 8;
+      uint64_t w = v[wy * wsz + wx];
+      unsigned shiftx = x % 8;
+      int b = int(w >> (shifty * 8 + shiftx)) & 1;
+      printf("%c", b ? '1' : '.');
+      if(shiftx == 7)
+        printf(" ");
+    }
+    printf("\n");
+  }
+} // --------------------------------------------------------------------------
+void dump_shmem(const vector<u64vector> &v_in) {
+  int szblocks = (int)sqrt(double(v_in.size()));
+  int szthreads = (int)sqrt(double(v_in[0].size()));
+  int sz = szblocks * szthreads;
+
+  for(int yr = 0; yr < sz; ++yr) {
+    int y = sz - 1 - yr;
+    int blocky = y / szthreads;
+    int thready = y % szthreads;
+    for(int x = 0; x < sz; ++x) {
+      int blockx = x / szthreads;
+      int threadx = x % szthreads;
+      int blockid = blocky * szblocks + blockx;
+      int threadidx = thready * szthreads + threadx;
+      uint64_t w = v_in[blockid][threadidx];
+      printf("%c", w ? 'A' : '.');
+      if(threadx == szthreads - 1)
+        printf(" ");
+    }
+    printf("\n");
+    if(thready == 0)
+      printf("\n");
+  }
+} // --------------------------------------------------------------------------
+/*
+@brief
+Host эмуляция CUDA функции для отладки
+
+@description
+Помещаем квадрат размером sz0*sz0,  где sz0=2^N кодировка Мортона
+в тор размером szfield*szfield, где szfield=1.5*sz0, Декартовы координаты
+с произвольным смещением и поворотом
+
+@params
+ subdata - входное поле размером sz0*sz0, где sz0=2^N
+ field - выходное поле размером szfield*szfield, где szfield=1.5*sz0
+ shift - сдвиг в выходном поле [-szfield/2, szfield/2)
+ d_rotates - смещения для угла поворота [-45, 45] (в градусах)
+
+@details
+ Состоит из 2 этапов
+ 1. Этап 1 - Кооперативная загрузка subdata в shared memory по словам
+ Вычисления в декартовых координатах за исключением получения значения слова из
+subdata.
+1.1 Находим проекцию центра текущего блока field на subdata. Нужны
+декартовы координаты.
+1.2 Заполняем shared memory значениями слов из subdata
+вокруг найденной проекции с запасом для учёта поворота.
+Запас = blockDim/2 с каждой стороны (поэтому wszshared=wszblock*2)
+Если проекция не выходит за пределы [0, sz0-1], то:
+  - пересчитываем декартовы координаты в код Мортона
+  - запоминаем слово
+ Если проекция выходит за пределы [0, sz0-1], то ничего не делаем.
+ 1.3 Запоминаем для каждого блока декартову координату левого нижнего угла
+subdata.
+
+ 2. Этап 2 - сохранение в глобальную память (field). Вычисления в цикле по
+битам. Сохранение одно слово целиком на Thread. Вычисления в декартовых
+координатах за исключением извлечения 1 бита из слова (тут Мортон).
+2.1 Читаем старое значение слова из field во временную переменную
+2.2 Вычисляем проекцию бита из field на subdata.
+Если вне [0,sz0), то сохраняем во временную переменную
+старый бит и пропускаем остальное.
+2.3 Определяем координаты слова для проекции этого бита
+2.4 Используя значения из 1.3 и 2.2 определяем координаты слова в shared memory
+2.5 Извлекаем из shared нужный бит
+2.6 Сохраняем бит во временную переменную
+2.7 После цикла сохраняем временную переменную в field
+*/
+template <int wszblock = 2>
+vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
+                       float2 d_rotates) {
+  int szfld = (int)sqrt((double)vfield.size()) * 8;
+  int szfld2 = szfld / 2;
+  int wszfld = szfld / 8;
+  int sz0 = szfld * 2 / 3;
+  int wsz0 = sz0 / 8;
+
+  constexpr int szblock = wszblock * 8;
+  constexpr int wszshared = wszblock * 2;
+  constexpr int szshared = wszshared * 8;
+
+  dim3 blockDim(wszblock, wszblock, 1u); // only debug - not fixed
+  dim3 gridDim(wszfld / wszblock, wszfld / wszblock, 1u);
+
+  // emulation of shared memory
+  vector<u64vector> vshared(gridDim.x * gridDim.y);
+  for(int y = 0; y < (int)gridDim.y; y++)
+    for(int x = 0; x < (int)gridDim.x; x++)
+      vshared[y * gridDim.x + x].resize(wszshared * wszshared, 0ULL);
+
+  vector<int2> vwsub_down0(gridDim.x * gridDim.y);
+
+  uint64_t *field = vfield.data();
+
+  assert(wsz0 * wsz0 == vsubdata.size());
+  const uint64_t *subdata = vsubdata.data();
+
+  for(unsigned by = 0; by < gridDim.y; by++) {
+    for(unsigned bx = 0; bx < gridDim.x; bx++) {
+      dim3 blockIdx(bx, by, 1u);
+      int id_block = int(by * gridDim.x + bx);
+      u64vector &s_sub = vshared[id_block];
+
+      // center of block (cob)
+      int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
+                   (int)blockIdx.y * wszblock + wszblock / 2};
+      int2 cob = {wcob.x * 8, wcob.y * 8};
+      int2 cob_shift = {cob.x + shift.x, cob.y + shift.y};
+      // int2 cob_wrap = wrap_toroid(cob_shift, szfld);
+      int2 cobc = {cob_shift.x - szfld2, cob_shift.y - szfld2};
+      int2 rotc = rotate_device(cobc, d_rotates);
+      int2 sub = {rotc.x + sz0 / 2, rotc.y + sz0 / 2};
+      int2 wsub = {(sub.x + 4 + szfld) / 8 - szfld / 8,
+                   (sub.y + 4 + szfld) / 8 - szfld / 8};
+      int2 wsub_down = {wsub.x - wszblock, wsub.y - wszblock};
+      vwsub_down0[id_block] = wsub_down;
+
+      for(int wy = 0; wy < 4; wy++) {
+        for(int wx = 0; wx < 4; wx++) {
+          int2 wsub_cart_uw = {wsub_down.x + wx, wsub_down.y + wy};
+          int2 wsub_cart = wrap_toroid(wsub_cart_uw, wsz0);
+          int visible_pixels = 0;
+          for(int py = 0; py < 8; py++) {
+            for(int px = 0; px < 8; px++) {
+              int2 fld_pixel = {(int)bx * szblock + wx * 8 + px,
+                                (int)by * szblock + wy * 8 + py};
+              int2 fld_shift_pixel = {fld_pixel.x + shift.x,
+                                      fld_pixel.y + shift.y};
+              int2 fldc_pixel = {fld_shift_pixel.x - szfld2,
+                                 fld_shift_pixel.y - szfld2};
+              int2 rotc_pixel = rotate_device(fldc_pixel, d_rotates);
+              int2 rotc_wrap = wrap_toroid0(rotc_pixel, szfld);
+              int2 isub_pixel = {rotc_wrap.x + sz0 / 2, rotc_wrap.y + sz0 / 2};
+              if(isub_pixel.x >= 0 && isub_pixel.x < sz0 && isub_pixel.y >= 0 &&
+                 isub_pixel.y < sz0) {
+                visible_pixels++;
+              }
+            }
+          }
+        }
+
+        for(unsigned ty = 0; ty < blockDim.y; ty++) {
+          for(unsigned tx = 0; tx < blockDim.x; tx++) {
+            dim3 threadIdx(tx, ty, 1u);
+            int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
+                      (int)blockIdx.y * wszblock + (int)threadIdx.y};
+            int idw = w.y * wszfld + w.x; // id word
+
+            // fill shared memory
+            for(int j = 0; j < 4; j++) {
+              int y = j / 2, x = j % 2;
+              int2 wshared = {int(threadIdx.x) * 2 + x,
+                              int(threadIdx.y) * 2 + y};
+              int2 wsub_cart_uw = {wsub_down.x + wshared.x,
+                                   wsub_down.y + wshared.y};
+
+              // Wrap using toroid logic
+              int2 wsub_cart = wrap_toroid(wsub_cart_uw, wsz0);
+              int idw_shared = wshared.y * wszshared + wshared.x;
+              auto idw_sub_morton = morton_encode(wsub_cart);
+              s_sub[idw_shared] = subdata[idw_sub_morton];
+            }
+          }
+        }
+      }
+    }
+    dump_shmem(vshared);
+    // copy shared memory to global memory
+    for(unsigned by = 0; by < gridDim.y; by++) {
+      for(unsigned bx = 0; bx < gridDim.x; bx++) {
+        dim3 blockIdx(bx, by, 1u);
+        int id_block = int(by * gridDim.x + bx);
+        int2 sub_down0 = {vwsub_down0[id_block].x * 8,
+                          vwsub_down0[id_block].y * 8};
+        int idblock = int(by * gridDim.x + bx);
+        u64vector &s_sub = vshared[idblock];
+        for(unsigned ty = 0; ty < blockDim.y; ty++) {
+          for(unsigned tx = 0; tx < blockDim.x; tx++) {
+            dim3 threadIdx(tx, ty, 1u);
+            int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
+                      (int)blockIdx.y * wszblock + (int)threadIdx.y};
+            int idw = w.y * wszfld + w.x;
+            uint64_t tile_field = field[idw];
+            int2 id_bit = {w.x << 3, w.y << 3};
+            for(int bit = 0; bit < 64; ++bit) {
+              int2 local = {bit & 7, bit >> 3};
+              int2 fld = {id_bit.x + local.x, id_bit.y + local.y};
+              int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
+              int2 fldc = {fld_shift.x - szfld2, fld_shift.y - szfld2};
+              int2 rotc = rotate_device(fldc, d_rotates);
+
+              int2 isub = {rotc.x + sz0 / 2, rotc.y + sz0 / 2};
+
+              if(isub.x < sz0 && isub.y < sz0 && isub.x >= 0 && isub.y >= 0) {
+                int2 shr = {isub.x - sub_down0.x, isub.y - sub_down0.y};
+                if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
+                   shr.y >= szshared) {
+                  continue;
+                }
+                int2 wshr = {shr.x / 8, shr.y / 8};
+                int idwshared = wshr.y * wszshared + wshr.x;
+                uint64_t val_shared = s_sub[idwshared];
+                uint32_t nbit = morton_encode(shr) & 63;
+                uint32_t val_bit = uint32_t(val_shared >> nbit) & 1;
+                replace_bit(tile_field, bit, val_bit);
+              }
+            }
+            field[idw] = tile_field;
+          }
+        }
+      }
+    }
+  }
+  return vshared;
+} // --------------------------------------------------------------------------
+
+int emu(int sz0, int2 shift, float angle) {
+  printf("\nemu: sz0:%d  shift:%d %d  angle:%f\n", sz0, shift.x, shift.y,
+         angle);
+  int ret = 0;
+  int szfld = sz0 * 3 / 2;
+  float2 d_rotates = get_d_rotates(angle);
+  u64vector vsubdata(sz0 * sz0 / 64, ~0ULL);  // fill with ones
+  u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
+  constexpr int wszblock = 2;                 // for debug, default is 16
+  auto sharedmem = push<wszblock>(vsubdata, vfield, shift, d_rotates);
+  int sumsub = sum1(vsubdata);
+  int sumfield = sum1(vfield);
+
+  if(sumsub != sumfield) {
+    printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
+    if(sz0 <= 32)
+      dump(vfield);
+
+    // #define DUMP_SHARED_MEM
+#ifdef DUMP_SHARED_MEM
+    // dump shared memory
+    for(int i = 0; i < (int)sharedmem.size(); ++i) {
+      printf("x:%d y:%d sharedmem[%d] ", i % 8, i / 8, i);
+      dump(sharedmem[i]);
+    }
+#endif // DUMP_SHARED_MEM
+    return 1;
+  }
+  printf("test Ok\n");
+  return 0;
+} // --------------------------------------------------------------------------
+
+int main() {
+  if(emu(32, {0, 0}, 0.0f))
+    return 1;
+  return 0;
+  if(emu(32, {1, 0}, 0.0f))
+    return 2;
+  if(emu(32, {0, 0}, 41.0f))
+    return 3;
+  if(emu(32, {1, 0}, 41.0f))
+    return 4;
+  if(emu(32, {12, -10}, -41.0f))
+    return 5;
+  printf("All tests Ok\n");
+  return 0;
+} // --------------------------------------------------------------------------
