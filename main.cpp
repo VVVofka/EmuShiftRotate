@@ -194,10 +194,11 @@ subdata.
 template <int wszblock = 2>
 vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                        float2 d_rotates) {
-  int szfld = (int)sqrt((double)vfield.size()) * 8;
-  int wszfld = szfld / 8;
-  int sz0 = szfld * 2 / 3;
-  int wsz0 = sz0 / 8;
+  const int szfld = (int)sqrt((double)vfield.size()) * 8;
+  const int wszfld = szfld / 8;
+  const int sz0 = szfld * 2 / 3;
+  const int hsz0 = sz0 / 2;
+  const int wsz0 = sz0 / 8;
 
   constexpr int szblock = wszblock * 8;
   constexpr int wszshared = wszblock * 2;
@@ -233,14 +234,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int cobx = (wcob.x * 8 + shift.x + szfld) % szfld;
       int coby = (wcob.y * 8 + shift.y + szfld) % szfld;
       int2 cobc = {cobx - szfld / 2, coby - szfld / 2};
-      int2 basec = rotate_device(cobc, d_rotates);
-      int2 base = {basec.x + szfld / 2, basec.y + szfld / 2};
+      int2 rotc = rotate_device(cobc, d_rotates);
+      int2 rot = {rotc.x + szfld / 2, rotc.y + szfld / 2};
 
-      vfld_base0[id_block].x = (((base.x + 4 + szfld) / 8) * 8) % szfld;
-      vfld_base0[id_block].y = (((base.y + 4 + szfld) / 8) * 8) % szfld;
+      vfld_base0[id_block].x = (((rot.x + 4 + szfld) / 8) * 8) - szfld;
+      vfld_base0[id_block].y = (((rot.y + 4 + szfld) / 8) * 8) - szfld;
 
-      int2 wsub_cob = {(basec.x + 4 + szfld / 2) / 8,
-                       (basec.y + 4 + szfld / 2) / 8};
+      int2 wsub_cob = {(rotc.x + 4 + szfld / 2) / 8,
+                       (rotc.y + 4 + szfld / 2) / 8};
       int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
@@ -261,10 +262,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             auto idw_sub_morton = morton_encode({x, y});
             s_sub[y * wszshared + x] = subdata[idw_sub_morton];
-          }
+          } // for(int j = 0; j < 4; j++) 
         } // threadIdx.x
       } // threadIdx.y
-    } // blockIdx.x 
+    } // blockIdx.x
   } // blockIdx.y
   dump_shmem(vshared);
 
@@ -289,22 +290,16 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - szfld / 2, fld_shift.y - szfld / 2};
             int2 rotc = rotate_device(fldc, d_rotates);
-            int2 rotc_wrap = wrap_toroid0(rotc, szfld);
-            int2 isub = {rotc_wrap.x + sz0 / 2, rotc_wrap.y + sz0 / 2};
-
-            // if(bx == 2 && by == 1 && tx == 1 && ty == 1 && (bit == 63)) {
-            //   printf("bit:%d fldc:%d %d isub:%d %d\n", bit, fldc.x, fldc.y,
-            //   isub.x, isub.y);
-            // }
-
-            if(isub.x < sz0 && isub.y < sz0 && isub.x >= 0 && isub.y >= 0) {
-              int2 shr = {isub.x - vfld_base0[idblock].x,
-                          isub.y - vfld_base0[idblock].y};
+            if(rotc.x >= -hsz0 && rotc.x < hsz0 && rotc.y >= -hsz0 &&
+               rotc.y < hsz0) {
+              int2 rot = {rotc.x + szfld / 2, rotc.y + szfld / 2};
+              int2 shr = {rot.x - vfld_base0[idblock].x,
+                          rot.y - vfld_base0[idblock].y};
               if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
                  shr.y >= szshared) {
                 // printf("shr:%d %d  b:%u %u t:%u %u  bit:%d(%d %d)  fld:%d
-                // %d\n", shr.x,shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3, fld.x,fld.y);
-                // continue;
+                // %d\n", shr.x,shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3,
+                // fld.x,fld.y); continue;
               }
               int2 wshr = {shr.x / 8, shr.y / 8};
               int idwshared = wshr.y * wszshared + wshr.x;
@@ -339,15 +334,6 @@ int emu(int sz0, int2 shift, float angle) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
     if(sz0 <= 32)
       dump(vfield);
-
-    // #define DUMP_SHARED_MEM
-#ifdef DUMP_SHARED_MEM
-    // dump shared memory
-    for(int i = 0; i < (int)sharedmem.size(); ++i) {
-      printf("x:%d y:%d sharedmem[%d] ", i % 8, i / 8, i);
-      dump(sharedmem[i]);
-    }
-#endif // DUMP_SHARED_MEM
     return 1;
   }
   printf("test Ok\n");
