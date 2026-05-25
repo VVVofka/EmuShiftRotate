@@ -1,8 +1,8 @@
 #include <assert.h>
-#include <vector>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <vector>
 
 // types as in CUDA
 struct int2 {
@@ -149,6 +149,12 @@ void dump_shmem(const vector<u64vector> &v_in) {
       printf("\n");
   }
 } // --------------------------------------------------------------------------
+int floor8(int val) {
+  return val >= 0 ? (val / 8) * 8 : ((val + 1) / 8) * 8 - 8;
+} // --------------------------------------------------------------------------
+int2 floor8(int2 val) {
+  return {floor8(val.x), floor8(val.y)};
+} // --------------------------------------------------------------------------
 /*
 @brief
 Host эмуляция CUDA функции для отладки
@@ -197,11 +203,12 @@ subdata.
 template <int wszblock = 2>
 vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                        float2 d_rotates) {
-  const int szfld = (int)sqrt((double)vfield.size()) * 8;
-  const int wszfld = szfld / 8;
-  const int sz0 = szfld * 2 / 3;
-  const int hsz0 = sz0 / 2;
-  const int wsz0 = sz0 / 8;
+  const int szfld = (int)sqrt((double)vfield.size()) * 8; // sz0 * 3 / 2
+  const int hszfld = szfld / 2;                           // szfld / 2
+  const int wszfld = szfld / 8;                           // szfld / 8
+  const int sz0 = szfld * 2 / 3;                          // 2 ^ N
+  const int hsz0 = sz0 / 2;                               // sz0 / 2
+  const int wsz0 = sz0 / 8;                               // sz0 / 8
 
   constexpr int szblock = wszblock * 8;
   constexpr int wszshared = wszblock * 2;
@@ -234,15 +241,17 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       // center of block (cob) in words
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
                    (int)blockIdx.y * wszblock + wszblock / 2};
-      int cobx = (wcob.x * 8 + shift.x + szfld) % szfld;
-      int coby = (wcob.y * 8 + shift.y + szfld) % szfld;
-      int2 cobc = {cobx - szfld / 2, coby - szfld / 2};
-      int2 rotc = rotate_device(cobc, d_rotates);
-      int2 rot = {rotc.x + szfld / 2, rotc.y + szfld / 2};
-      vfld_base0[idblock] = rotc;
+      int cobx = (wcob.x * 8 + 4 + shift.x + szfld) % szfld;
+      int coby = (wcob.y * 8 + 4 + shift.y + szfld) % szfld;
+      int2 cobc = {cobx - hszfld, coby - hszfld};
+      int2 cobrotc = rotate_device(cobc, d_rotates);
+      vfld_base0[idblock] = cobrotc;
+      int2 cobrot = (cobrotc);
 
-      int2 wsub_cob = {(rotc.x + 4 + sz0 / 2) / 8, (rotc.y + 4 + sz0 / 2) / 8};
+      int2 wsub_cob = {(cobrotc.x + 4 + hsz0) / 8, (cobrotc.y + 4 + hsz0) / 8};
       int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
+      printf("block:%d %d  wsub_cob:%+d %+d  wsub_down:%+d %+d\n", blockIdx.x,
+             blockIdx.y, wsub_cob.x, wsub_cob.y, wsub_down.x, wsub_down.y);
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
@@ -255,7 +264,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
             int2 wsub_cart = {wsub_down.x + wshared.x, wsub_down.y + wshared.y};
-            wsub_cart = wrap_toroid(wsub_cart, wsz0);
+            if(!(wsub_cart.x >= 0 && wsub_cart.x < wsz0 && wsub_cart.y >= 0 &&
+                 wsub_cart.y < wsz0))
+              continue;
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -264,14 +275,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  //  dump_shmem(vshared);
+  dump_shmem(vshared);
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
       const int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
       int2 cobc = vfld_base0[idblock];
-      int2 cob = {cobc.x + sz0 / 2, cobc.y + sz0 / 2};
+      int2 cob = {cobc.x + hsz0, cobc.y + hsz0};
       int2 wcob = {int(cob.x + 4) / 8, int(cob.y + 4) / 8};
       if(wcob.x < 0 || wcob.y < 0 || wcob.x >= sz0 || wcob.y >= sz0)
         continue;
@@ -288,14 +299,15 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           int2 id_bit0 = {w.x * 8, w.y * 8};
           for(int bit = 0; bit < 64; ++bit) {
             int2 fld = {id_bit0.x + (bit & 7), id_bit0.y + (bit >> 3)};
-            // if(fld.x == 8 && fld.y == 8)              printf("pause\n");
+            if(fld.x == 7 && fld.y == 7)
+              printf("pause\n");
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 fldc = {fld_shift.x - szfld / 2, fld_shift.y - szfld / 2};
+            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
             int2 rotc = rotate_device(fldc, d_rotates);
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
-            int2 rot = {rotc.x + sz0 / 2, rotc.y + sz0 / 2};
+            int2 rot = {rotc.x + hsz0, rotc.y + hsz0};
             int2 shr = {rot.x - vfld_base0[idblock].x,
                         rot.y - vfld_base0[idblock].y};
             if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
@@ -344,12 +356,19 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
+  for(int i = 0; i <= 17; ++i){
+    auto r = floor8({i,-i});
+    printf("%2d  %d %d\n", i, r.x, r.y);
+  }
+  return 0;
   if(emu(32, {0, 0}, 0.0f))
     return 1;
-  if(emu(32, {-3, 2}, 0.0f))
-    return 2;
-  if(emu(32, {0, 9}, 0.0f))
+  // if(emu(32, {1, 1}, 0.0f))
+  //   return 2;
+
+  if(emu(32, {8, 8}, 0.0f))
     return 3;
+
   // if(emu(32, {0, 0}, 41.0f))
   //   return 3;
   // if(emu(32, {1, 0}, 41.0f))
