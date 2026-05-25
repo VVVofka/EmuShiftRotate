@@ -263,7 +263,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  dump_shmem(vshared);
+  //  dump_shmem(vshared);
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
@@ -274,7 +274,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int2 wcob = {int(cob.x + 4) / 8, int(cob.y + 4) / 8};
       if(wcob.x < 0 || wcob.y < 0 || wcob.x >= sz0 || wcob.y >= sz0)
         continue;
-      int2 wbase0 = {wcob.x - wszshared, wcob.y - wszshared};
+      int2 wbase0 = {wcob.x - wszshared / 2, wcob.y - wszshared / 2};
 
       u64vector &s_sub = vshared[idblock];
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
@@ -283,7 +283,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                     (int)blockIdx.y * wszblock + (int)threadIdx.y};
           int idw = w.y * wszfld + w.x;
           uint64_t tile_field =
-              field[idw]; // если не записываем, то остаются старые
+              field[idw]; // if don't overwrite bit then old value will be used
           int2 id_bit0 = {w.x * 8, w.y * 8};
           for(int bit = 0; bit < 64; ++bit) {
             int2 fld = {id_bit0.x + (bit & 7), id_bit0.y + (bit >> 3)};
@@ -333,6 +333,7 @@ int emu(int sz0, int2 shift, float angle) {
 
   if(sumsub != sumfield) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
+    dump_shmem(sharedmem);
     if(sz0 <= 32)
       dump(vfield);
     return 1;
@@ -344,15 +345,14 @@ int emu(int sz0, int2 shift, float angle) {
 int main() {
   if(emu(32, {0, 0}, 0.0f))
     return 1;
-  return 0;
-  if(emu(32, {1, 0}, 0.0f))
+  if(emu(32, {0, 1}, 0.0f))
     return 2;
-  if(emu(32, {0, 0}, 41.0f))
-    return 3;
-  if(emu(32, {1, 0}, 41.0f))
-    return 4;
-  if(emu(32, {12, -10}, -41.0f))
-    return 5;
+  // if(emu(32, {0, 0}, 41.0f))
+  //   return 3;
+  // if(emu(32, {1, 0}, 41.0f))
+  //   return 4;
+  // if(emu(32, {12, -10}, -41.0f))
+  //   return 5;
   printf("All tests Ok\n");
   return 0;
 } // --------------------------------------------------------------------------
