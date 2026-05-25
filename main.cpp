@@ -240,8 +240,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       vfld_base0[id_block].x = (((rot.x + 4 + szfld) / 8) * 8) - szfld;
       vfld_base0[id_block].y = (((rot.y + 4 + szfld) / 8) * 8) - szfld;
 
-      int2 wsub_cob = {(rotc.x + 4 + szfld / 2) / 8,
-                       (rotc.y + 4 + szfld / 2) / 8};
+      int2 wsub_cob = {(rotc.x + 4 + sz0 / 2) / 8, (rotc.y + 4 + sz0 / 2) / 8};
       int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
@@ -252,17 +251,16 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
           // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
-            int x = int(threadIdx.x) * 2 + j % 2;
-            if(wsub_down.x + x < 0 || wsub_down.x + x >= wsz0)
+            int2 wshared = {int(threadIdx.x) * 2 + j % 2,
+                           int(threadIdx.y) * 2 + j / 2};
+            int2 wsub_cart = {wsub_down.x + wshared.x, wsub_down.y + wshared.y};
+            if(wsub_cart.x < 0 || wsub_cart.y < 0 || wsub_cart.x >= wsz0 ||
+               wsub_cart.y >= wsz0)
               continue;
-
-            int y = int(threadIdx.y) * 2 + j / 2;
-            if(wsub_down.y + y < 0 || wsub_down.y + y >= wsz0)
-              continue;
-
-            auto idw_sub_morton = morton_encode({x, y});
-            s_sub[y * wszshared + x] = subdata[idw_sub_morton];
-          } // for(int j = 0; j < 4; j++) 
+            auto idw_sub_morton = morton_encode(wsub_cart);
+            int idshared = wshared.y * wszshared + wshared.x;
+            s_sub[idshared] = subdata[idw_sub_morton];
+          } // for(int j = 0; j < 4; j++)
         } // threadIdx.x
       } // threadIdx.y
     } // blockIdx.x
