@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <vector>
 
+// types as in CUDA
 struct int2 {
   int x, y;
 };
@@ -127,7 +128,16 @@ void dump_shmem(const vector<u64vector> &v_in) {
       int blockid = blocky * szblocks + blockx;
       int threadidx = thready * szthreads + threadx;
       uint64_t w = v_in[blockid][threadidx];
-      printf("%c", w ? 'A' : '.');
+
+      int sum = 0;
+      for(int i = 0; i < 64; ++i)
+        sum += int((w >> i) & 1ULL);
+
+      if(sum)
+        printf("%X", (sum - 1) / 4);
+      else
+        printf(".");
+
       if(threadx == szthreads - 1)
         printf(" ");
     }
@@ -195,14 +205,16 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
   dim3 blockDim(wszblock, wszblock, 1u); // only debug - not fixed
   dim3 gridDim(wszfld / wszblock, wszfld / wszblock, 1u);
+  dim3 blockIdx, threadIdx;
 
   // emulation of shared memory
   vector<u64vector> vshared(gridDim.x * gridDim.y);
-  for(int y = 0; y < (int)gridDim.y; y++)
-    for(int x = 0; x < (int)gridDim.x; x++)
-      vshared[y * gridDim.x + x].resize(wszshared * wszshared, 0ULL);
+  constexpr int szshall = wszshared * wszshared;
+  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++)
+    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++)
+      vshared[blockIdx.y * gridDim.x + blockIdx.x].resize(szshall, 0ULL);
 
-  vector<int2> vwsub_down0(gridDim.x * gridDim.y);
+  vector<int2> vfld_base0(gridDim.x * gridDim.y); // single variable in cuda
 
   uint64_t *field = vfield.data();
 
@@ -210,65 +222,59 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   const uint64_t *subdata = vsubdata.data(); // as kernel
 
   // find base of block in field for s_sub[0]
-  for(unsigned by = 0; by < gridDim.y; by++) {
-    for(unsigned bx = 0; bx < gridDim.x; bx++) {
-      dim3 blockIdx(bx, by, 1u);
-      int id_block = int(by * gridDim.x + bx);
-      u64vector &s_sub = vshared[id_block];
+  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
+    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
+      int id_block = int(blockIdx.y * gridDim.x + blockIdx.x);
+      u64vector &s_sub = vshared[id_block]; // shared memory for block
 
       // center of block (cob) in words
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
                    (int)blockIdx.y * wszblock + wszblock / 2};
-      int cobx = (wcob.x * 8 + shift.x + 4 + szfld) % szfld;
-      int coby = (wcob.y * 8 + shift.y + 4 + szfld) % szfld;
+      int cobx = (wcob.x * 8 + shift.x + szfld) % szfld;
+      int coby = (wcob.y * 8 + shift.y + szfld) % szfld;
       int2 cobc = {cobx - szfld / 2, coby - szfld / 2};
       int2 basec = rotate_device(cobc, d_rotates);
-      int2 base = {c.x + szfld / 2, rotc.y + szfld / 2};
-      int2 wbase = {base.x / 8, base.y / 8};
-      int2 wbase_down = {wbase.x - wszblock, wbase.y - wszblock};
-      vwsub_down0[id_block] = wbase_down;
+      int2 base = {basec.x + szfld / 2, basec.y + szfld / 2};
 
-      for(unsigned ty = 0; ty < blockDim.y; ty++) {
-        for(unsigned tx = 0; tx < blockDim.x; tx++) {
-          // if(bx == 2 && by == 1 && tx == 1 && ty == 1)
-          // printf("bx=%d by=%d\n", bx, by);
+      vfld_base0[id_block].x = (((base.x + 4 + szfld) / 8) * 8) % szfld;
+      vfld_base0[id_block].y = (((base.y + 4 + szfld) / 8) * 8) % szfld;
 
-          dim3 threadIdx(tx, ty, 1u);
+      int2 wsub_cob = {(basec.x + 4 + szfld / 2) / 8,
+                       (basec.y + 4 + szfld / 2) / 8};
+      int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
+
+      for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
+        for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
           int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
                     (int)blockIdx.y * wszblock + (int)threadIdx.y};
           int idw = w.y * wszfld + w.x; // id word
 
-          // fill shared memory
+          // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
-            int y = j / 2, x = j % 2;
-            int2 wshared = {int(threadIdx.x) * 2 + x, int(threadIdx.y) * 2 + y};
-            int2 wsub_cart = {wbase_down.x + wshared.x, wbase_down.y + wshared.y};
+            int x = int(threadIdx.x) * 2 + j % 2;
+            if(wsub_down.x + x < 0 || wsub_down.x + x >= wsz0)
+              continue;
 
-            if(wsub_cart.x >= 0 && wsub_cart.x < wsz0 && wsub_cart.y >= 0 &&
-               wsub_cart.y < wsz0) {
-              int idw_shared = wshared.y * wszshared + wshared.x;
-              auto idw_sub_morton = morton_encode(wsub_cart);
-              s_sub[idw_shared] = subdata[idw_sub_morton];
-            }
+            int y = int(threadIdx.y) * 2 + j / 2;
+            if(wsub_down.y + y < 0 || wsub_down.y + y >= wsz0)
+              continue;
+
+            auto idw_sub_morton = morton_encode({x, y});
+            s_sub[y * wszshared + x] = subdata[idw_sub_morton];
           }
-        }
-      }
-    }
-  }
+        } // threadIdx.x
+      } // threadIdx.y
+    } // blockIdx.x 
+  } // blockIdx.y
   dump_shmem(vshared);
 
   // copy shared memory to global memory
-  for(unsigned by = 0; by < gridDim.y; by++) {
-    for(unsigned bx = 0; bx < gridDim.x; bx++) {
-      dim3 blockIdx(bx, by, 1u);
-      int id_block = int(by * gridDim.x + bx);
-      int2 sub_down0 = {vwsub_down0[id_block].x * 8,
-                        vwsub_down0[id_block].y * 8};
-      int idblock = int(by * gridDim.x + bx);
+  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
+    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
+      int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
       u64vector &s_sub = vshared[idblock];
-      for(unsigned ty = 0; ty < blockDim.y; ty++) {
-        for(unsigned tx = 0; tx < blockDim.x; tx++) {
-          dim3 threadIdx(tx, ty, 1u);
+      for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
+        for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
           int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
                     (int)blockIdx.y * wszblock + (int)threadIdx.y};
           int idw = w.y * wszfld + w.x;
@@ -277,8 +283,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           for(int bit = 0; bit < 64; ++bit) {
             int2 local = {bit & 7, bit >> 3};
             int2 fld = {id_bit.x + local.x, id_bit.y + local.y};
+            if(fld.x == 8 && fld.y == 8)
+              printf("pause\n");
+
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            // int2 fld_wrap = wrap_toroid(fld_shift, szfld);
             int2 fldc = {fld_shift.x - szfld / 2, fld_shift.y - szfld / 2};
             int2 rotc = rotate_device(fldc, d_rotates);
             int2 rotc_wrap = wrap_toroid0(rotc, szfld);
@@ -286,19 +294,17 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             // if(bx == 2 && by == 1 && tx == 1 && ty == 1 && (bit == 63)) {
             //   printf("bit:%d fldc:%d %d isub:%d %d\n", bit, fldc.x, fldc.y,
-            //   isub.x,
-            //          isub.y);
+            //   isub.x, isub.y);
             // }
 
             if(isub.x < sz0 && isub.y < sz0 && isub.x >= 0 && isub.y >= 0) {
-              int2 shr = {isub.x - sub_down0.x, isub.y - sub_down0.y};
+              int2 shr = {isub.x - vfld_base0[idblock].x,
+                          isub.y - vfld_base0[idblock].y};
               if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
                  shr.y >= szshared) {
                 // printf("shr:%d %d  b:%u %u t:%u %u  bit:%d(%d %d)  fld:%d
-                // %d\n", shr.x,
-                //        shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3, fld.x,
-                //        fld.y);
-                continue;
+                // %d\n", shr.x,shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3, fld.x,fld.y);
+                // continue;
               }
               int2 wshr = {shr.x / 8, shr.y / 8};
               int idwshared = wshr.y * wszshared + wshr.x;
@@ -309,10 +315,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             }
           }
           field[idw] = tile_field;
-        }
-      }
-    }
-  }
+        } // threadIdx.x
+      } // threadIdx.y
+    } // blockIdx.x
+  } // blockIdx.y
   return vshared;
 } // --------------------------------------------------------------------------
 
