@@ -1,5 +1,8 @@
 #include <assert.h>
 #include <vector>
+#include <cstdint>
+#include <cmath>
+#include <cstdio>
 
 // types as in CUDA
 struct int2 {
@@ -252,9 +255,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
             int2 wsub_cart = {wsub_down.x + wshared.x, wsub_down.y + wshared.y};
-            if(wsub_cart.x < 0 || wsub_cart.y < 0 || wsub_cart.x >= wsz0 ||
-               wsub_cart.y >= wsz0)
-              continue;
+            wsub_cart = wrap_toroid(wsub_cart, wsz0);
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -345,8 +346,10 @@ int emu(int sz0, int2 shift, float angle) {
 int main() {
   if(emu(32, {0, 0}, 0.0f))
     return 1;
-  if(emu(32, {0, 1}, 0.0f))
+  if(emu(32, {-3, 2}, 0.0f))
     return 2;
+  if(emu(32, {0, 9}, 0.0f))
+    return 3;
   // if(emu(32, {0, 0}, 41.0f))
   //   return 3;
   // if(emu(32, {1, 0}, 41.0f))
