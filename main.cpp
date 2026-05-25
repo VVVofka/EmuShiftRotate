@@ -225,8 +225,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   // find base of block in field for s_sub[0]
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
-      int id_block = int(blockIdx.y * gridDim.x + blockIdx.x);
-      u64vector &s_sub = vshared[id_block]; // shared memory for block
+      int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
+      u64vector &s_sub = vshared[idblock]; // shared memory for block
 
       // center of block (cob) in words
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
@@ -236,9 +236,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int2 cobc = {cobx - szfld / 2, coby - szfld / 2};
       int2 rotc = rotate_device(cobc, d_rotates);
       int2 rot = {rotc.x + szfld / 2, rotc.y + szfld / 2};
-
-      vfld_base0[id_block].x = (((rot.x + 4 + szfld) / 8) * 8) - szfld;
-      vfld_base0[id_block].y = (((rot.y + 4 + szfld) / 8) * 8) - szfld;
+      vfld_base0[idblock] = rotc;
 
       int2 wsub_cob = {(rotc.x + 4 + sz0 / 2) / 8, (rotc.y + 4 + sz0 / 2) / 8};
       int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
@@ -252,7 +250,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
-                           int(threadIdx.y) * 2 + j / 2};
+                            int(threadIdx.y) * 2 + j / 2};
             int2 wsub_cart = {wsub_down.x + wshared.x, wsub_down.y + wshared.y};
             if(wsub_cart.x < 0 || wsub_cart.y < 0 || wsub_cart.x >= wsz0 ||
                wsub_cart.y >= wsz0)
@@ -270,42 +268,47 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
-      int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
+      const int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
+      int2 cobc = vfld_base0[idblock];
+      int2 cob = {cobc.x + sz0 / 2, cobc.y + sz0 / 2};
+      int2 wcob = {int(cob.x + 4) / 8, int(cob.y + 4) / 8};
+      if(wcob.x < 0 || wcob.y < 0 || wcob.x >= sz0 || wcob.y >= sz0)
+        continue;
+      int2 wbase0 = {wcob.x - wszshared, wcob.y - wszshared};
+
       u64vector &s_sub = vshared[idblock];
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
           int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
                     (int)blockIdx.y * wszblock + (int)threadIdx.y};
           int idw = w.y * wszfld + w.x;
-          uint64_t tile_field = field[idw];
-          int2 id_bit = {w.x << 3, w.y << 3};
+          uint64_t tile_field =
+              field[idw]; // если не записываем, то остаются старые
+          int2 id_bit0 = {w.x * 8, w.y * 8};
           for(int bit = 0; bit < 64; ++bit) {
-            int2 local = {bit & 7, bit >> 3};
-            int2 fld = {id_bit.x + local.x, id_bit.y + local.y};
-            if(fld.x == 8 && fld.y == 8)
-              printf("pause\n");
-
+            int2 fld = {id_bit0.x + (bit & 7), id_bit0.y + (bit >> 3)};
+            // if(fld.x == 8 && fld.y == 8)              printf("pause\n");
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - szfld / 2, fld_shift.y - szfld / 2};
             int2 rotc = rotate_device(fldc, d_rotates);
-            if(rotc.x >= -hsz0 && rotc.x < hsz0 && rotc.y >= -hsz0 &&
-               rotc.y < hsz0) {
-              int2 rot = {rotc.x + szfld / 2, rotc.y + szfld / 2};
-              int2 shr = {rot.x - vfld_base0[idblock].x,
-                          rot.y - vfld_base0[idblock].y};
-              if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
-                 shr.y >= szshared) {
-                // printf("shr:%d %d  b:%u %u t:%u %u  bit:%d(%d %d)  fld:%d
-                // %d\n", shr.x,shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3,
-                // fld.x,fld.y); continue;
-              }
-              int2 wshr = {shr.x / 8, shr.y / 8};
-              int idwshared = wshr.y * wszshared + wshr.x;
-              uint64_t val_shared = s_sub[idwshared];
-              uint32_t nbit = morton_encode(shr) & 63;
-              uint32_t val_bit = uint32_t(val_shared >> nbit) & 1;
-              replace_bit(tile_field, bit, val_bit);
+            if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
+               rotc.y >= hsz0)
+              continue;
+            int2 rot = {rotc.x + sz0 / 2, rotc.y + sz0 / 2};
+            int2 shr = {rot.x - vfld_base0[idblock].x,
+                        rot.y - vfld_base0[idblock].y};
+            if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
+               shr.y >= szshared) {
+              // printf("shr:%d %d  b:%u %u t:%u %u  bit:%d(%d %d)  fld:%d
+              // %d\n", shr.x,shr.y, bx, by, tx, ty, bit, bit & 7, bit >> 3,
+              // fld.x,fld.y); continue;
             }
+            int2 wshr = {shr.x / 8, shr.y / 8};
+            int idwshared = wshr.y * wszshared + wshr.x;
+            uint64_t val_shared = s_sub[idwshared];
+            uint32_t nbit = morton_encode(shr) & 63;
+            uint32_t val_bit = uint32_t(val_shared >> nbit) & 1;
+            replace_bit(tile_field, bit, val_bit);
           }
           field[idw] = tile_field;
         } // threadIdx.x
