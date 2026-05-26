@@ -244,14 +244,24 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int cobx = (wcob.x * 8 + 4 + shift.x + szfld) % szfld;
       int coby = (wcob.y * 8 + 4 + shift.y + szfld) % szfld;
       int2 cobc = {cobx - hszfld, coby - hszfld};
-      int2 cobrotc = rotate_device(cobc, d_rotates);
-      vfld_base0[idblock] = cobrotc;
-      int2 cobrot = (cobrotc);
 
-      int2 wsub_cob = {(cobrotc.x + 4 + hsz0) / 8, (cobrotc.y + 4 + hsz0) / 8};
-      int2 wsub_down = {wsub_cob.x - wszblock, wsub_cob.y - wszblock};
-      printf("block:%d %d  wsub_cob:%+d %+d  wsub_down:%+d %+d\n", blockIdx.x,
-             blockIdx.y, wsub_cob.x, wsub_cob.y, wsub_down.x, wsub_down.y);
+      int2 cobrotc = rotate_device(cobc, d_rotates);
+      int2 cobrot_wrap = wrap_toroid0(cobrotc, szfld);
+      int2 cobrot = {cobrot_wrap.x + hszfld, cobrot_wrap.y + hszfld};
+
+      // a new block after the turn
+      int2 bl_rot = {cobrot.x / szblock, cobrot.y / szblock};
+
+      // begin word of the new block after the turn
+      int2 wrot0 = {bl_rot.x * wszblock, bl_rot.y * wszblock};
+
+      // wbase may go beyond
+      int2 wbase = {wrot0.x - wszblock / 2, wrot0.y - wszblock / 2};
+      int2 wbasec = {wbase.x - wszfld / 2, wbase.y - wszfld / 2};
+      vfld_base0[idblock] = {wbasec.x * 8, wbasec.y * 8};
+
+      printf("block:%d %d:  %+d %+d\n", blockIdx.x, blockIdx.y,
+             vfld_base0[idblock].x, vfld_base0[idblock].y);
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
@@ -275,7 +285,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  dump_shmem(vshared);
+  // dump_shmem(vshared);
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
@@ -356,18 +366,13 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  for(int i = 0; i <= 17; ++i){
-    auto r = floor8({i,-i});
-    printf("%2d  %d %d\n", i, r.x, r.y);
-  }
-  return 0;
   if(emu(32, {0, 0}, 0.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
 
-  if(emu(32, {8, 8}, 0.0f))
-    return 3;
+  // if(emu(32, {8, 8}, 0.0f))
+  //   return 3;
 
   // if(emu(32, {0, 0}, 41.0f))
   //   return 3;
