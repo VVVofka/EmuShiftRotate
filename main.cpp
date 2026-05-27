@@ -397,17 +397,28 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 rotc = rotate_device(fldc, d_rotates);
 
+            if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
+               threadIdx.y == 1 && nbit == 7) {
+              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
+                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
+              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d\nrotc:%d %d [%d,%d)\n",
+                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
+                     rotc.x, rotc.y, -hsz0, hsz0);
+            }
+
+            // rotc — проекция на subdata в центрированных координатах.
+            // Если вне subdata, ничего не пишем.
+            if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
+               rotc.y >= hsz0)
+              continue;
+
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
 
             if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
                threadIdx.y == 1 && nbit == 7) {
-              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
-                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
-              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
-                     "rotc:%d %d  shr:%d %d  wshr:%d %d (%d)\n",
-                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
-                     rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y, wszshared);
+              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
+                     wshr.y, wszshared);
             }
 
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
