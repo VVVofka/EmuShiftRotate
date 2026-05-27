@@ -259,7 +259,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   const int hsz0 = sz0 / 2;                               // sz0 / 2
   const int wsz0 = sz0 / 8;                               // sz0 / 8
   const int hwsz0 = wsz0 / 2;                             // sz0 / 16
-  const int shbound = hwsz0;// hwszfld;// + wszblock / 2;
+  const int shbound = hwsz0; // hwszfld;// + wszblock / 2;
 
   constexpr int szblock = wszblock * 8;
   constexpr int wszshared = wszblock * 2;
@@ -315,14 +315,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                             int(threadIdx.y) * 2 + j / 2};
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            if(wsubc_cart.x < -shbound)
-              wsubc_cart.x += wszfld;
-            if(wsubc_cart.y < -shbound)
-              wsubc_cart.y += wszfld;
-            if(wsubc_cart.x >= shbound)
-              wsubc_cart.x -= wszfld;
-            if(wsubc_cart.y >= shbound)
-              wsubc_cart.y -= wszfld;
+            // if(wsubc_cart.x < -shbound)
+            //   wsubc_cart.x += wszfld;
+            // if(wsubc_cart.y < -shbound)
+            //   wsubc_cart.y += wszfld;
+            // if(wsubc_cart.x >= shbound)
+            //   wsubc_cart.x -= wszfld;
+            // if(wsubc_cart.y >= shbound)
+            //   wsubc_cart.y -= wszfld;
 
             if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
                wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
@@ -397,8 +397,10 @@ int emu(int sz0, int2 shift, float angle) {
   int ret = 0;
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
-  u64vector vsubdata(sz0 * sz0 / 64, ~0ULL);  // fill with ones
-  //vsubdata[0] = 0ULL;
+  u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
+  vsubdata[5] = 1ULL << 21;
+  vsubdata[10] = (1ULL << 42) | (1ULL << 41);
+  vsubdata[15] = (1ULL << 63) | (1ULL << 62) | (1ULL << 61);
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
@@ -418,7 +420,7 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {-16, 0}, 45.0f))
+  if(emu(32, {0, 0}, 20.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
