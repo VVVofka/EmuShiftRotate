@@ -300,6 +300,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int coby = wcob.y * 8 + shift.y;
       int2 cobc = {cobx - hszfld, coby - hszfld};
 
+      cobc = wrap_toroid0(cobc, szfld); // qwen
+
       int2 cobrotc = rotate_device(cobc, d_rotates);
       int2 cobrotc_floor = floor8({cobrotc.x + 0, cobrotc.y + 0});
       int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
@@ -315,14 +317,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                             int(threadIdx.y) * 2 + j / 2};
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            if(wsubc_cart.x < -shbound)
-              wsubc_cart.x += wszfld;
-            if(wsubc_cart.y < -shbound)
-              wsubc_cart.y += wszfld;
-            if(wsubc_cart.x >= shbound)
-              wsubc_cart.x -= wszfld;
-            if(wsubc_cart.y >= shbound)
-              wsubc_cart.y -= wszfld;
+            // if(wsubc_cart.x < -shbound)
+            //   wsubc_cart.x += wszfld;
+            // if(wsubc_cart.y < -shbound)
+            //   wsubc_cart.y += wszfld;
+            // if(wsubc_cart.x >= shbound)
+            //   wsubc_cart.x -= wszfld;
+            // if(wsubc_cart.y >= shbound)
+            //   wsubc_cart.y -= wszfld;
 
             if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
                wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
@@ -358,10 +360,19 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           // #pragma unroll
           for(int nbit = 0; nbit < 64; ++nbit) {
             int2 bit = {nbit & 7, nbit >> 3};
+
+            // qwen
+            // int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
+            // int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
+            // int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+            // int2 rotc = rotate_device(fldc, d_rotates);
+            
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+            fldc = wrap_toroid0(fldc, szfld);
             int2 rotc = rotate_device(fldc, d_rotates);
+
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
