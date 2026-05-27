@@ -206,11 +206,11 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   const int szfld = (int)sqrt((double)vfield.size()) * 8; // sz0 * 3 / 2
   const int hszfld = szfld / 2;                           // szfld / 2
   const int wszfld = szfld / 8;                           // szfld / 8
-//  const int hwszfld = wszfld / 2;                         // szfld / 16
-  const int sz0 = szfld * 2 / 3;                          // 2 ^ N
-  const int hsz0 = sz0 / 2;                               // sz0 / 2
-  const int wsz0 = sz0 / 8;                               // sz0 / 8
-  const int hwsz0 = wsz0 / 2;                             // sz0 / 16
+  //  const int hwszfld = wszfld / 2;                         // szfld / 16
+  const int sz0 = szfld * 2 / 3; // 2 ^ N
+  const int hsz0 = sz0 / 2;      // sz0 / 2
+  const int wsz0 = sz0 / 8;      // sz0 / 8
+  const int hwsz0 = wsz0 / 2;    // sz0 / 16
 
   constexpr int szblock = wszblock * 8;
   constexpr int wszshared = wszblock * 2;
@@ -243,15 +243,15 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       // center of block (cob) in words
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
                    (int)blockIdx.y * wszblock + wszblock / 2};
-      int cobx = (wcob.x * 8 + 4 + shift.x + szfld) % szfld;
-      int coby = (wcob.y * 8 + 4 + shift.y + szfld) % szfld;
+      int cobx = (wcob.x * 8 + 0 + shift.x + szfld) % szfld;
+      int coby = (wcob.y * 8 + 0 + shift.y + szfld) % szfld;
       int2 cobc = {cobx - hszfld, coby - hszfld};
 
       int2 cobrotc = rotate_device(cobc, d_rotates);
       int2 cobrotc_floor = floor8(cobrotc);
       int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
       int2 wbasec = {basec.x / 8, basec.y / 8};
-      vfld_base0[idblock] = wbasec;
+      vfld_base0[idblock] = basec;
 
       // printf("block:%d %d:  %+d %+d\n", blockIdx.x, blockIdx.y,
       //        vfld_base0[idblock].x, vfld_base0[idblock].y);
@@ -280,7 +280,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
     } // blockIdx.x
   } // blockIdx.y
   // dump_shmem(vshared);
-  return vshared;
+  // return vshared;
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
@@ -288,7 +288,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       const int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
       int2 cobc = vfld_base0[idblock];
       int2 cob = {cobc.x + hsz0, cobc.y + hsz0};
-      int2 wcob = {int(cob.x + 4) / 8, int(cob.y + 4) / 8};
+      int2 wcob = {int(cob.x + 0) / 8, int(cob.y + 0) / 8};
       if(wcob.x < 0 || wcob.y < 0 || wcob.x >= sz0 || wcob.y >= sz0)
         continue;
       int2 wbase0 = {wcob.x - wszshared / 2, wcob.y - wszshared / 2};
@@ -304,7 +304,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           int2 id_bit0 = {w.x * 8, w.y * 8};
           for(int bit = 0; bit < 64; ++bit) {
             int2 fld = {id_bit0.x + (bit & 7), id_bit0.y + (bit >> 3)};
-            if(fld.x == 7 && fld.y == 7)
+            if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 1 &&
+               threadIdx.y == 1)
               printf("pause\n");
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
@@ -312,9 +313,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
-            int2 rot = {rotc.x + hsz0, rotc.y + hsz0};
-            int2 shr = {rot.x - vfld_base0[idblock].x,
-                        rot.y - vfld_base0[idblock].y};
+            // int2 rot = {rotc.x + hsz0, rotc.y + hsz0};
+            int2 &base = vfld_base0[idblock];
+            int2 shr = {rotc.x - base.x, rotc.y - base.y};
             if(shr.x < 0 || shr.y < 0 || shr.x >= szshared ||
                shr.y >= szshared) {
               // printf("shr:%d %d  b:%u %u t:%u %u  bit:%d(%d %d)  fld:%d
@@ -352,8 +353,8 @@ int emu(int sz0, int2 shift, float angle) {
   if(sumsub != sumfield) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
     dump_shmem(sharedmem);
-    // if(sz0 <= 32)
-    //   dump(vfield);
+    if(sz0 <= 32)
+      dump(vfield);
     return 1;
   }
   printf("test Ok\n");
@@ -361,7 +362,7 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {0, 0}, 20.0f))
+  if(emu(32, {0, 0}, -0.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
