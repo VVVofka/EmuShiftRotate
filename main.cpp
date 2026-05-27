@@ -298,9 +298,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                    (int)blockIdx.y * wszblock + wszblock / 2};
       int cobx = wcob.x * 8 + shift.x;
       int coby = wcob.y * 8 + shift.y;
-      int2 cobc = {cobx - hszfld, coby - hszfld};
 
-      cobc = wrap_toroid0(cobc, szfld); // qwen
+      // int2 cobc = {cobx - hszfld, coby - hszfld};
+      int2 cobc = {cobx - hszfld + 4, coby - hszfld + 4}; // qwen
+      cobc = wrap_toroid0(cobc, szfld);                   // qwen
 
       int2 cobrotc = rotate_device(cobc, d_rotates);
       int2 cobrotc_floor = floor8({cobrotc.x + 0, cobrotc.y + 0});
@@ -369,12 +370,27 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+
+            // int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+            int2 fldc = {fld_shift.x - hszfld + 4,
+                         fld_shift.y - hszfld + 4}; // qwen
+
             fldc = wrap_toroid0(fldc, szfld);
             int2 rotc = rotate_device(fldc, d_rotates);
 
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
+
+            if(blockIdx.x == 0 && blockIdx.y == 1 && threadIdx.x == 1 &&
+               threadIdx.y == 0 && nbit == 7) {
+              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
+                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
+              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
+                     "rotc:%d %d  shr:%d %d  wshr:%d %d (%d)\n",
+                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
+                     rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y, wszshared);
+            }
+
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
                wshr.y >= wszshared)
               continue;
@@ -383,8 +399,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
-            if(blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 1 &&
+            if(blockIdx.x == 0 && blockIdx.y == 1 && threadIdx.x == 1 &&
                threadIdx.y == 0 && nbit == 7) {
+              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
+                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
                      "rotc:%d %d  shr:%d %d  wshr:%d %d  idwshared:%d \n"
                      "val_shared:%zX  shift_bit:%d  val_bit:%d\n",
@@ -431,7 +449,8 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {1, 0}, 45.0f))
+  //if(emu(32, {1, 0}, 45.0f))
+  if(emu(32, {1-4, 0-4}, 45.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
