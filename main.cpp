@@ -153,7 +153,7 @@ void dump_shmem(const vector<u64vector> &v_in) {
 } // --------------------------------------------------------------------------
 void dump_base(const ivector &v, bool is_w = false) {
   int sz = (int)sqrt(double(v.size()));
-  printf("\ndump base by %s. sz=%d\n", is_w ? "words" : "bits", sz);  
+  printf("\ndump base by %s. sz=%d\n", is_w ? "words" : "bits", sz);
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     for(int x = 0; x < sz; ++x) {
@@ -320,12 +320,22 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
+
+            // 4G
+            // int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
+            // if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
+            //    wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
+            //   continue;
+            // int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
+
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
-               wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
-              continue;
+            // toroidal wrap в координатах subdata относительно центра
+            wsubc_cart = wrap_toroid0(wsubc_cart, sz0 / 8);
+
             int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
+            // end 4G
+
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -359,8 +369,31 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-            fldc = wrap_toroid0(fldc, szfld);
+
+            // chatgpt
+            // int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+            // fldc = wrap_toroid0(fldc, szfld);
+            // выбираем toroid image относительно центра текущего блока,
+            // а не относительно глобального нуля.
+            // Иначе внутри одного блока появляется разрыв при переходе через
+            // границу torus.
+
+            int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
+                         (int)blockIdx.y * wszblock + wszblock / 2};
+
+            int2 cob_shift = {wcob.x * 8 + shift.x, wcob.y * 8 + shift.y};
+
+            int2 cobc = {cob_shift.x - hszfld, cob_shift.y - hszfld};
+            cobc = wrap_toroid0(cobc, szfld);
+
+            int2 fldc_raw = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+
+            // wrap относительно центра блока
+            int2 df = {fldc_raw.x - cobc.x, fldc_raw.y - cobc.y};
+            df = wrap_toroid0(df, szfld);
+
+            int2 fldc = {cobc.x + df.x, cobc.y + df.y};
+            // --- end chatgpt
 
             int2 rotc = rotate_device(fldc, d_rotates);
 
