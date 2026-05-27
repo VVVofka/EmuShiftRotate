@@ -298,16 +298,12 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
                    (int)blockIdx.y * wszblock + wszblock / 2};
       int cobx = wcob.x * 8 + shift.x;
-      // printf("\ncobx=%d\n", cobx);
       int coby = wcob.y * 8 + shift.y;
       int2 cobc = {cobx - hszfld, coby - hszfld};
 
       int2 cobrotc = rotate_device(cobc, d_rotates);
-      // printf("cobrotc.x=%d\n", cobrotc.x);
       int2 cobrotc_floor = floor8({cobrotc.x + 0, cobrotc.y + 0});
-      // printf("cobrotc_floor.x=%d\n", cobrotc_floor.x);
       int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
-      // printf("basec.x=%d\n", basec.x);
       vfld_base0[idblock] = basec;
 
       int2 wbasec = {basec.x / 8, basec.y / 8};
@@ -347,9 +343,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
     } // blockIdx.x
   } // blockIdx.y
   dump_base(vfld_base0);
-  dump_shmem(vshared);
+  // dump_shmem(vshared);
   dump_src_shmem(vsrcshmem);
-  // return vshared;
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
@@ -365,6 +360,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           uint64_t tile_field =
               field[idw]; // if don't overwrite bit then old value will be used
           int2 id_bit0 = {w.x * 8, w.y * 8};
+          // #pragma unroll
           for(int nbit = 0; nbit < 64; ++nbit) {
             int2 bit = {nbit & 7, nbit >> 3};
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
@@ -381,13 +377,21 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
+            if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 &&
+               threadIdx.y == 0 && nbit == 0) {
+              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
+                     "rotc:%d %d  shr:%d %d  wshr:%d %d  idwshared:%d \n"
+                     "val_shared:%d  shift_bit:%d  val_bit:%d\n",
+                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x,
+                     fldc.y, rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y,
+                     idwshared, val_shared, shift_bit, val_bit);
+            }
           }
           field[idw] = tile_field;
         } // threadIdx.x
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  dump(vfield);
   return vshared;
 } // --------------------------------------------------------------------------
 
@@ -400,15 +404,16 @@ int emu(int sz0, int2 shift, float angle) {
   u64vector vsubdata(sz0 * sz0 / 64, ~0ULL);  // fill with ones
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
-  auto sharedmem = push<wszblock>(vsubdata, vfield, shift, d_rotates);
+  auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
   int sumsub = sum1(vsubdata);
   int sumfield = sum1(vfield);
 
   if(sumsub != sumfield) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
-    // dump_shmem(sharedmem);
-    // if(sz0 <= 32)
-    //   dump(vfield);
+    if(sz0 <= 32) {
+      // dump_shmem(vshared);
+      dump(vfield);
+    }
     return 1;
   }
   printf("test Ok\n");
@@ -416,7 +421,7 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {0, 0}, 45.0f))
+  if(emu(32, {-18, 0}, 45.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
