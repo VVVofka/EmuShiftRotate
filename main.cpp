@@ -315,14 +315,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                             int(threadIdx.y) * 2 + j / 2};
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            // if(wsubc_cart.x < -shbound)
-            //   wsubc_cart.x += wszfld;
-            // if(wsubc_cart.y < -shbound)
-            //   wsubc_cart.y += wszfld;
-            // if(wsubc_cart.x >= shbound)
-            //   wsubc_cart.x -= wszfld;
-            // if(wsubc_cart.y >= shbound)
-            //   wsubc_cart.y -= wszfld;
+            if(wsubc_cart.x < -shbound)
+              wsubc_cart.x += wszfld;
+            if(wsubc_cart.y < -shbound)
+              wsubc_cart.y += wszfld;
+            if(wsubc_cart.x >= shbound)
+              wsubc_cart.x -= wszfld;
+            if(wsubc_cart.y >= shbound)
+              wsubc_cart.y -= wszfld;
 
             if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
                wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
@@ -373,7 +373,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
             if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 &&
-               threadIdx.y == 0 && nbit == 0) {
+               threadIdx.y == 0 && nbit == 8) {
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
                      "rotc:%d %d  shr:%d %d  wshr:%d %d  idwshared:%d \n"
                      "val_shared:%zX  shift_bit:%d  val_bit:%d\n",
