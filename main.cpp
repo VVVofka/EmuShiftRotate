@@ -300,7 +300,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       int cobx = wcob.x * 8 + shift.x;
       int coby = wcob.y * 8 + shift.y;
       int2 cobc = {cobx - hszfld, coby - hszfld};
-      cobc = wrap_toroid0(cobc, szfld); // qwen
 
       // qwen
       int2 cobrotc = rotate_device(cobc, d_rotates);
@@ -317,12 +316,26 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
+
+            // int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
+
+            // if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
+            //    wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
+            //   continue;
+            // int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
-               wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
-              continue;
+            if(wsubc_cart.x < -hwsz0)
+              wsubc_cart.x += wsz0;
+            if(wsubc_cart.x >= hwsz0)
+              wsubc_cart.x -= wsz0;
+            if(wsubc_cart.y < -hwsz0)
+              wsubc_cart.y += wsz0;
+            if(wsubc_cart.y >= hwsz0)
+              wsubc_cart.y -= wsz0;
+
             int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
+
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -357,7 +370,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-            fldc = wrap_toroid0(fldc, szfld);
 
             int2 rotc = rotate_device(fldc, d_rotates);
 
@@ -384,8 +396,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             replace_bit(tile_field, nbit, val_bit);
             if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
                threadIdx.y == 1 && nbit == 7) {
-              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
-                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
               printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
                      idwshared, val_shared, shift_bit, val_bit);
             }
