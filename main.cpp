@@ -366,7 +366,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             // int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             // int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
             // int2 rotc = rotate_device(fldc, d_rotates);
-            
+
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
@@ -383,8 +383,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
-            if(blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0 &&
-               threadIdx.y == 0 && nbit == 8) {
+            if(blockIdx.x == 1 && blockIdx.y == 1 && threadIdx.x == 1 &&
+               threadIdx.y == 0 && nbit == 7) {
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
                      "rotc:%d %d  shr:%d %d  wshr:%d %d  idwshared:%d \n"
                      "val_shared:%zX  shift_bit:%d  val_bit:%d\n",
@@ -409,9 +409,9 @@ int emu(int sz0, int2 shift, float angle) {
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
   u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
-  vsubdata[5] = 1ULL << 21;
-  vsubdata[10] = (1ULL << 42) | (1ULL << 41);
-  vsubdata[15] = (1ULL << 63) | (1ULL << 62) | (1ULL << 61);
+  // vsubdata[5] = 1ULL << 21;
+  // vsubdata[10] = (1ULL << 42) | (1ULL << 41);
+  // vsubdata[15] = (1ULL << 63) | (1ULL << 62) | (1ULL << 61);
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
@@ -431,7 +431,7 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {0, 0}, 20.0f))
+  if(emu(32, {1, 0}, 45.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
