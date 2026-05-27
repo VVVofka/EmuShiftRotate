@@ -98,7 +98,7 @@ float2 get_d_rotates(float angle_deg) {
 void dump(const u64vector &v) {
   int wsz = int(sqrt(double(v.size())));
   int sz = wsz * 8;
-  printf("sz=%d\n", sz);
+  printf("dump vfield  sz=%d\n", sz);
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     int wy = y / 8;
@@ -259,7 +259,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   const int hsz0 = sz0 / 2;                               // sz0 / 2
   const int wsz0 = sz0 / 8;                               // sz0 / 8
   const int hwsz0 = wsz0 / 2;                             // sz0 / 16
-  const int shbound = hwszfld + wszblock / 2;
+  const int shbound = hwsz0;// hwszfld;// + wszblock / 2;
 
   constexpr int szblock = wszblock * 8;
   constexpr int wszshared = wszblock * 2;
@@ -280,7 +280,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       vshared[idx].resize(szshall, 0ULL);
       vsrcshmem[idx].resize(szshall, {INT_MAX, INT_MAX});
     }
-
   ivector vfld_base0(gridDim.x * gridDim.y); // single variable in cuda
 
   uint64_t *field = vfield.data();
@@ -310,10 +309,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
-          int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
-                    (int)blockIdx.y * wszblock + (int)threadIdx.y};
-          int idw = w.y * wszfld + w.x; // id word
-
           // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
@@ -381,10 +376,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                threadIdx.y == 0 && nbit == 0) {
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
                      "rotc:%d %d  shr:%d %d  wshr:%d %d  idwshared:%d \n"
-                     "val_shared:%d  shift_bit:%d  val_bit:%d\n",
-                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x,
-                     fldc.y, rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y,
-                     idwshared, val_shared, shift_bit, val_bit);
+                     "val_shared:%zX  shift_bit:%d  val_bit:%d\n",
+                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
+                     rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y, idwshared,
+                     val_shared, shift_bit, val_bit);
             }
           }
           field[idw] = tile_field;
@@ -392,6 +387,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
+  dump(vfield);
   return vshared;
 } // --------------------------------------------------------------------------
 
@@ -402,6 +398,7 @@ int emu(int sz0, int2 shift, float angle) {
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
   u64vector vsubdata(sz0 * sz0 / 64, ~0ULL);  // fill with ones
+  //vsubdata[0] = 0ULL;
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
@@ -412,7 +409,7 @@ int emu(int sz0, int2 shift, float angle) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
     if(sz0 <= 32) {
       // dump_shmem(vshared);
-      dump(vfield);
+      // dump(vfield);
     }
     return 1;
   }
@@ -421,7 +418,7 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {-18, 0}, 45.0f))
+  if(emu(32, {-16, 0}, 45.0f))
     return 1;
   // if(emu(32, {1, 1}, 0.0f))
   //   return 2;
