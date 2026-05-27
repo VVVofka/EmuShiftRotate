@@ -98,7 +98,7 @@ float2 get_d_rotates(float angle_deg) {
 void dump(const u64vector &v) {
   int wsz = int(sqrt(double(v.size())));
   int sz = wsz * 8;
-  printf("dump vfield  sz=%d\n", sz);
+  printf("\nDump vfield  sz=%d\n", sz);
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     int wy = y / 8;
@@ -122,6 +122,7 @@ void dump_shmem(const vector<u64vector> &v_in) {
   int szthreads = (int)sqrt(double(v_in[0].size()));
   int sz = szblocks * szthreads;
 
+  printf("\nDump shmem.  sz=%d\n", sz);
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     int blocky = y / szthreads;
@@ -152,6 +153,7 @@ void dump_shmem(const vector<u64vector> &v_in) {
 } // --------------------------------------------------------------------------
 void dump_base(const ivector &v, bool is_w = false) {
   int sz = (int)sqrt(double(v.size()));
+  printf("\ndump base by %s. sz=%d\n", is_w ? "words" : "bits", sz);  
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     for(int x = 0; x < sz; ++x) {
@@ -169,6 +171,7 @@ void dump_src_shmem(const vector<ivector> &v_in) {
   int szthreads = (int)sqrt(double(v_in[0].size()));
   int sz = szblocks * szthreads;
 
+  printf("\nDump sources of shmem.  sz=%d\n", sz);
   for(int yr = 0; yr < sz; ++yr) {
     int y = sz - 1 - yr;
     int blocky = y / szthreads;
@@ -429,20 +432,7 @@ int emu(int sz0, int2 shift, float angle) {
 
 int main() {
   if(emu(32, {5, 0}, 45.0f))
-    // if(emu(32, {1 - 4, 0 - 4}, 45.0f))
     return 1;
-  // if(emu(32, {1, 1}, 0.0f))
-  //   return 2;
-
-  // if(emu(32, {8, 8}, 0.0f))
-  //   return 3;
-
-  // if(emu(32, {0, 0}, 41.0f))
-  //   return 3;
-  // if(emu(32, {1, 0}, 41.0f))
-  //   return 4;
-  // if(emu(32, {12, -10}, -41.0f))
-  //   return 5;
   printf("All tests Ok\n");
   return 0;
 } // --------------------------------------------------------------------------
