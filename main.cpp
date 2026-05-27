@@ -317,21 +317,15 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
 
-            // int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
-
-            // if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
-            //    wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
-            //   continue;
-            // int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
-            if(wsubc_cart.x < -hwsz0)
+            while(wsubc_cart.x < -hwsz0)
               wsubc_cart.x += wsz0;
-            if(wsubc_cart.x >= hwsz0)
+            while(wsubc_cart.x >= hwsz0)
               wsubc_cart.x -= wsz0;
-            if(wsubc_cart.y < -hwsz0)
+            while(wsubc_cart.y < -hwsz0)
               wsubc_cart.y += wsz0;
-            if(wsubc_cart.y >= hwsz0)
+            while(wsubc_cart.y >= hwsz0)
               wsubc_cart.y -= wsz0;
 
             int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
@@ -373,11 +367,36 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 rotc = rotate_device(fldc, d_rotates);
 
+            // int2 shr = {rotc.x - base.x, rotc.y - base.y};
+            // int2 wshr = {shr.x / 8, shr.y / 8};
+
+            // if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
+            //    threadIdx.y == 1 && nbit == 7) {
+            //   printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
+            //          blockIdx.y, threadIdx.x, threadIdx.y, nbit);
+            //   printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
+            //          "rotc:%d %d  shr:%d %d  wshr:%d %d (%d)\n",
+            //          fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
+            //          rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y,
+            //          wszshared);
+            // }
+
+            // if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
+            //    wshr.y >= wszshared)
+            //   continue;
+            // int idwshared = wshr.y * wszshared + wshr.x;
+            // uint64_t val_shared = s_sub[idwshared];
+            // uint32_t shift_bit = morton_encode(shr) & 63;
+
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
 
-            if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
-               threadIdx.y == 1 && nbit == 7) {
+            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
+               wshr.y >= wszshared)
+              continue;
+
+            if(blockIdx.x == 0 && blockIdx.y == 1 && threadIdx.x == 1 &&
+               threadIdx.y == 0 && nbit == 7) {
               printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
                      blockIdx.y, threadIdx.x, threadIdx.y, nbit);
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d \n"
@@ -386,12 +405,14 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                      rotc.x, rotc.y, shr.x, shr.y, wshr.x, wshr.y, wszshared);
             }
 
-            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
-               wshr.y >= wszshared)
-              continue;
             int idwshared = wshr.y * wszshared + wshr.x;
             uint64_t val_shared = s_sub[idwshared];
-            uint32_t shift_bit = morton_encode(shr) & 63;
+            // Use positive modulo for bit offset within the word
+            int2 shr_mod = {(shr.x % 8 + 8) % 8, (shr.y % 8 + 8) % 8};
+            uint32_t shift_bit = morton_encode(shr_mod) & 63;
+
+            // -
+
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
             if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
