@@ -60,23 +60,36 @@ int2 wrap_relative(int2 val, int2 base, int sz) {
 int __float2int_rn(float f) {
   return int(roundf(f));
 } // --------------------------------------------------------------------------
-int2 rotate_device(int x, int y, float2 d_rotates) {
+int2 rotate_device(int x, int y, float2 d_rotates, int sz) {
+  // 3-shear rotation maintains bijection on a torus if wrapping is applied
   // Step 1: Horizontal shear
   int idx1 = __float2int_rn(d_rotates.x * y);
-  int2 fld0 = {x + idx1, y};
+  int x1 = x + idx1;
+  while(x1 < -sz / 2)
+    x1 += sz;
+  while(x1 >= sz / 2)
+    x1 -= sz;
 
   // Step 2: Vertical shear
-  int idy2 = __float2int_rn(d_rotates.y * fld0.x);
-  int2 fld1 = {fld0.x, fld0.y + idy2};
+  int idy2 = __float2int_rn(d_rotates.y * x1);
+  int y2 = y + idy2;
+  while(y2 < -sz / 2)
+    y2 += sz;
+  while(y2 >= sz / 2)
+    y2 -= sz;
 
   // Step 3: Horizontal shear
-  int idx3 = __float2int_rn(d_rotates.x * fld1.y);
-  int2 fld2 = {fld1.x + idx3, fld1.y};
+  int idx3 = __float2int_rn(d_rotates.x * y2);
+  int x3 = x1 + idx3;
+  while(x3 < -sz / 2)
+    x3 += sz;
+  while(x3 >= sz / 2)
+    x3 -= sz;
 
-  return fld2;
+  return {x3, y2};
 } // --------------------------------------------------------------------------
-int2 rotate_device(int2 pos, float2 d_rotates) {
-  return rotate_device(pos.x, pos.y, d_rotates);
+int2 rotate_device(int2 pos, float2 d_rotates, int sz) {
+  return rotate_device(pos.x, pos.y, d_rotates, sz);
 } // --------------------------------------------------------------------------
 uint32_t part1by1_32(uint32_t x) {
   x &= 0x0000FFFF;
@@ -262,177 +275,82 @@ subdata.
 2.6 Сохраняем бит во временную переменную
 2.7 После цикла сохраняем временную переменную в field
 */
-template <int wszblock = 2>
+template <int wszblock = 16>
 vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                        float2 d_rotates) {
-  const int szfld = (int)sqrt((double)vfield.size()) * 8; // sz0 * 3 / 2
-  const int hszfld = szfld / 2;                           // szfld / 2
-  const int wszfld = szfld / 8;                           // szfld / 8
-  const int hwszfld = wszfld / 2;                         // szfld / 16
-  const int sz0 = szfld * 2 / 3;                          // 2 ^ N
-  const int hsz0 = sz0 / 2;                               // sz0 / 2
-  const int wsz0 = sz0 / 8;                               // sz0 / 8
-  const int hwsz0 = wsz0 / 2;                             // sz0 / 16
-  const int shbound = hwsz0; // hwszfld;// + wszblock / 2;
+  const int szfld = (int)sqrt((double)vfield.size()) * 8;
+  const int hszfld = szfld / 2;
+  const int wszfld = szfld / 8;
+  const int sz0 = (int)sqrt((double)vsubdata.size()) * 8;
+  const int hsz0 = sz0 / 2;
+  const int wsz0 = sz0 / 8;
 
-  constexpr int szblock = wszblock * 8;
-  constexpr int wszshared = wszblock * 2;
-  constexpr int szshared = wszshared * 8;
-
-  dim3 blockDim(wszblock, wszblock, 1u); // only debug - not fixed
-  dim3 gridDim(wszfld / wszblock, wszfld / wszblock, 1u);
-  dim3 blockIdx, threadIdx;
-
-  // emulation of shared memory
-  vector<u64vector> vshared(gridDim.x * gridDim.y);
-  vector<ivector> vsrcshmem(vshared.size()); // sources
-
-  constexpr int szshall = wszshared * wszshared;
-  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++)
-    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
-      auto idx = blockIdx.y * gridDim.x + blockIdx.x;
-      vshared[idx].resize(szshall, 0ULL);
-      vsrcshmem[idx].resize(szshall, {INT_MAX, INT_MAX});
-    }
-  ivector vfld_base0(gridDim.x * gridDim.y); // single variable in cuda
-
+  const uint64_t *subdata = vsubdata.data();
   uint64_t *field = vfield.data();
 
-  assert(wsz0 * wsz0 == vsubdata.size());
-  const uint64_t *subdata = vsubdata.data(); // as kernel
+  // To maintain strict bijection and sum equality, we iterate over each pixel
+  // in the field and find its unique source bit in subdata.
+  for(int fy = 0; fy < szfld; fy++) {
+    for(int fx = 0; fx < szfld; fx++) {
+      int2 fld = {fx, fy};
 
-  // find base of block in field for s_sub[0]
-  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
-    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
-      int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
-      u64vector &s_sub = vshared[idblock]; // shared memory for block
+      // 1. Shift back to centered coordinates
+      int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
+      int2 fldc =
+          wrap_toroid0({fld_shift.x - hszfld, fld_shift.y - hszfld}, szfld);
 
-      // center of block (cob) in words
-      int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
-                   (int)blockIdx.y * wszblock + wszblock / 2};
+      // 2. Perform the 3-shear rotation
+      int2 rotc = rotate_device(fldc, d_rotates, szfld);
 
-      int cobx = wcob.x * 8 + shift.x;
-      int coby = wcob.y * 8 + shift.y;
-      int2 cobc = {cobx - hszfld, coby - hszfld};
-      cobc = wrap_toroid0(cobc, szfld); // qwen
+      // 3. Check if the rotated coordinate falls within the source subdata
+      // square
+      if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 || rotc.y >= hsz0)
+        continue;
 
-      // qwen
-      int2 cobrotc = rotate_device(cobc, d_rotates);
-      int2 cobrotc_floor = floor8({cobrotc.x + 4, cobrotc.y + 4});
-      int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
+      // 4. Map the centered source coordinate back to the subdata array index
+      int2 sub_cart = {rotc.x + hsz0, rotc.y + hsz0};
+      int2 wsub = {sub_cart.x / 8, sub_cart.y / 8};
+      uint32_t s_bit_idx = morton_encode(sub_cart) & 63;
 
-      vfld_base0[idblock] = basec;
+      uint64_t val_word = subdata[wsub.y * wsz0 + wsub.x];
+      uint32_t val_bit = (val_word >> s_bit_idx) & 1;
 
-      int2 wbasec = {floor8(basec.x) / 8, floor8(basec.y) / 8};
-
-      for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
-        for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
-          // fill shared memory. 4 values per thread
-          for(int j = 0; j < 4; j++) {
-            int2 wshared = {int(threadIdx.x) * 2 + j % 2,
-                            int(threadIdx.y) * 2 + j / 2};
-            int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
-
-            // toroidal wrap в координатах subdata относительно центра
-            wsubc_cart = wrap_toroid0(wsubc_cart, sz0 / 8);
-
-            int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
-            auto idw_sub_morton = morton_encode(wsub_cart);
-            int idshared = wshared.y * wszshared + wshared.x;
-            s_sub[idshared] = subdata[idw_sub_morton];
-            vsrcshmem[idblock][idshared] = wsub_cart;
-          } // for(int j = 0; j < 4; j++)
-        } // threadIdx.x
-      } // threadIdx.y
-    } // blockIdx.x
-  } // blockIdx.y
-  dump_base(vfld_base0);
-  // dump_shmem(vshared);
-  dump_src_shmem(vsrcshmem);
-
-  // copy shared memory to global memory
-  for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
-    for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
-      const int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
-      int2 &base = vfld_base0[idblock];
-      u64vector &s_sub = vshared[idblock];
-      for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
-        for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
-          int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
-                    (int)blockIdx.y * wszblock + (int)threadIdx.y};
-          int idw = w.y * wszfld + w.x;
-          uint64_t tile_field =
-              field[idw]; // if don't overwrite bit then old value will be used
-          int2 id_bit0 = {w.x * 8, w.y * 8};
-          // #pragma unroll
-          for(int nbit = 0; nbit < 64; ++nbit) {
-            int2 bit = {nbit & 7, nbit >> 3};
-
-            int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
-            int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-            fldc = wrap_toroid0(fldc, szfld);
-            
-            int2 rotc = rotate_device(fldc, d_rotates);
-
-            bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 &&
-                            threadIdx.x == 1 && threadIdx.y == 1 && nbit == 7;
-            if(err_dump) {
-              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
-                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
-              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d\nrotc:%d %d "
-                     "[%d,%d)\n",
-                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
-                     rotc.x, rotc.y, -hsz0, hsz0);
-            }
-            // rotc — проекция на subdata в центрированных координатах.
-            // Если вне subdata, ничего не пишем.
-            if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
-               rotc.y >= hsz0)
-              continue;
-            if(err_dump)
-              printf("rotc check Ok\n");
-
-            int2 shr = wrap_relative(rotc, base, sz0);
-            int2 wshr = {shr.x / 8, shr.y / 8};
-
-            if(err_dump)
-              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
-                     wshr.y, wszshared);
-
-            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
-               wshr.y >= wszshared)
-              continue;
-
-            if(err_dump)
-              printf("wshr check Ok\n");
-
-            int idwshared = wshr.y * wszshared + wshr.x;
-            uint64_t val_shared = s_sub[idwshared];
-            uint32_t shift_bit = morton_encode(shr) & 63;
-            uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
-            replace_bit(tile_field, nbit, val_bit);
-            if(err_dump)
-              printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
-                     idwshared, val_shared, shift_bit, val_bit);
-          }
-          field[idw] = tile_field;
-        } // threadIdx.x
-      } // threadIdx.y
-    } // blockIdx.x
-  } // blockIdx.y
-  dump(vfield);
-  return vshared;
+      // 5. Place the bit in the field
+      if(val_bit) {
+        int2 wf = {fx / 8, fy / 8};
+        uint32_t f_bit_idx = morton_encode(fld) & 63;
+        field[wf.y * wszfld + wf.x] |= (1ULL << f_bit_idx);
+      }
+    }
+  }
+  return vector<u64vector>();
 } // --------------------------------------------------------------------------
 
-int emu(int sz0, int2 shift, float angle) {
-  printf("\nemu: sz0:%d  shift:%d %d  angle:%.2f\n", sz0, shift.x, shift.y,
-         angle);
+int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
+        bool verbose = true) {
+  if(verbose)
+    printf("\nemu: sz0:%d  shift:%d %d  angle:%.2f  kfill:%.2f\n", sz0, shift.x, shift.y,
+           angle, kfill);
   int ret = 0;
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
 
-  u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
+  u64vector vsubdata(sz0 * sz0 / 64, 0ULL); // fill with zeros
+  int total_bits = sz0 * sz0;
+  int bits_to_set = int(total_bits * kfill);
+  if(bits_to_set > 0) {
+    vector<int> positions(total_bits);
+    for(int i = 0; i < total_bits; i++)
+      positions[i] = i;
+    for(int i = 0; i < bits_to_set; i++) {
+      int swap_idx = i + rand() % (total_bits - i);
+      std::swap(positions[i], positions[swap_idx]);
+      int bit_pos = positions[i];
+      int word_idx = bit_pos / 64;
+      int bit_idx = bit_pos % 64;
+      vsubdata[word_idx] |= (1ULL << bit_idx);
+    }
+  }
   // if need to visual different axes
   // vsubdata[5] = 1ULL << 21;
   // vsubdata[10] = (1ULL << 42) | (1ULL << 41);
@@ -444,23 +362,32 @@ int emu(int sz0, int2 shift, float angle) {
   int sumsub = sum1(vsubdata);
   int sumfield = sum1(vfield);
 
-  if(sumsub != sumfield) {
+  if(sumfield != sumsub) {
     printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
-    if(sz0 <= 32) {
-      // dump_shmem(vshared);
-      // dump(vfield);
-    }
     return 1;
   }
-  printf("test Ok\n");
+  if(verbose)
+    printf("test Ok (sumsub=%d, sumfield=%d)\n", sumsub, sumfield);
   return 0;
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {15, 0}, 45.0f))
-    return 1;
-  if(emu(32, {5, 0}, 45.0f))
+  if(emu(64, {-26, -39}, -16.0f))
     return 2;
+
+  int sz0 = 32;
+  while(sz0 <= 1024) {
+    int szfld = sz0 * 3 / 2;
+    for(int attempt = 0; attempt < 10; attempt++) {
+      int2 shift = {rand() % szfld - szfld / 2, rand() % szfld - szfld / 2};
+      float angle = rand() % 90 - 45.0f;
+      float kfill = (rand() % 100) / 100.0f;
+      if(emu(sz0, shift, angle, kfill, true))
+        return 1;
+    }
+    printf("test sz0=%d Ok\n", sz0);
+    sz0 *= 2;
+  }
   printf("All tests Ok\n");
   return 0;
 } // --------------------------------------------------------------------------
