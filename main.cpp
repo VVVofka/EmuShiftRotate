@@ -372,7 +372,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
             fldc = wrap_toroid0(fldc, szfld);
-            
+
             int2 rotc = rotate_device(fldc, d_rotates);
 
             bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 &&
@@ -421,18 +421,59 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  dump(vfield);
+  // dump(vfield);
   return vshared;
 } // --------------------------------------------------------------------------
 
-int emu(int sz0, int2 shift, float angle) {
-  printf("\nemu: sz0:%d  shift:%d %d  angle:%.2f\n", sz0, shift.x, shift.y,
-         angle);
+int2 findFirstErr(int sz0, int2 shift, float angle) {
+  int szfld = sz0 * 3 / 2;
+  int wszfld = szfld / 8;
+  u64vector vsub(sz0 * sz0 / 64, 0ULL);
+  for(int i = 0; i < sz0 * sz0; i++) {
+    u64vector vfld(wszfld * wszfld, 0ULL);
+    int w = i / 64;
+    int offset = i % 64;
+    vsub[w] = (1ULL << offset);
+
+    float2 d_rotates = get_d_rotates(angle);
+    constexpr int wszblock = 2; // for debug, default is 16
+    auto vshared = push<wszblock>(vsub, vfld, shift, d_rotates);
+    int sumsub = sum1(vsub);
+    if(sumsub != 1) {
+      printf("sumsub:%d  sumshared:%d\n", sumsub, sum1(vshared));
+      return {w, offset};
+    }
+
+    vsub[w] = 0ULL;
+  }
+  return {-1, -1};
+} // --------------------------------------------------------------------------
+
+int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
+        bool verbose = true) {
+  if(verbose)
+    printf("\nemu: sz0:%d  shift:%d %d  angle:%.2f  kfill:%.2f\n", sz0, shift.x,
+           shift.y, angle, kfill);
   int ret = 0;
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
 
-  u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
+  u64vector vsubdata(sz0 * sz0 / 64, 0ULL); // fill with zeros
+  int total_bits = sz0 * sz0;
+  int bits_to_set = int(total_bits * kfill);
+  if(bits_to_set > 0) {
+    vector<int> positions(total_bits);
+    for(int i = 0; i < total_bits; i++)
+      positions[i] = i;
+    for(int i = 0; i < bits_to_set; i++) {
+      int swap_idx = i + rand() % (total_bits - i);
+      std::swap(positions[i], positions[swap_idx]);
+      int bit_pos = positions[i];
+      int word_idx = bit_pos / 64;
+      int bit_idx = bit_pos % 64;
+      vsubdata[word_idx] |= (1ULL << bit_idx);
+    }
+  }
   // if need to visual different axes
   // vsubdata[5] = 1ULL << 21;
   // vsubdata[10] = (1ULL << 42) | (1ULL << 41);
@@ -452,7 +493,8 @@ int emu(int sz0, int2 shift, float angle) {
     }
     return 1;
   }
-  printf("test Ok\n");
+  if(verbose)
+    printf("test Ok (sumsub=%d, sumfield=%d)\n", sumsub, sumfield);
   return 0;
 } // --------------------------------------------------------------------------
 
@@ -467,7 +509,7 @@ int main() {
       int2 shift = {rand() % szfld - szfld / 2, rand() % szfld - szfld / 2};
       float angle = rand() % 90 - 45.0f;
       float kfill = (rand() % 100) / 100.0f;
-      if(emu(sz0, shift, angle, kfill, true))
+      if(emu(sz0, shift, angle, kfill, false))
         return 1;
     }
     printf("test sz0=%d Ok\n", sz0);
