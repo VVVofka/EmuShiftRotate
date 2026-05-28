@@ -312,7 +312,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
       vfld_base0[idblock] = basec;
 
-      int2 wbasec = {basec.x / 8, basec.y / 8};
+      int2 wbasec = {floor8(basec.x) / 8, floor8(basec.y) / 8};
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
@@ -320,22 +320,12 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
-
-            // 4G
-            // int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
-            // if(wsubc_cart.x < -hwsz0 || wsubc_cart.y < -hwsz0 ||
-            //    wsubc_cart.x >= hwsz0 || wsubc_cart.y >= hwsz0)
-            //   continue;
-            // int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
-
             int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
 
             // toroidal wrap в координатах subdata относительно центра
             wsubc_cart = wrap_toroid0(wsubc_cart, sz0 / 8);
 
             int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
-            // end 4G
-
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -369,23 +359,12 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-
-            // chatgpt
-            // int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-            // fldc = wrap_toroid0(fldc, szfld);
-            // выбираем toroid image относительно центра текущего блока,
-            // а не относительно глобального нуля.
-            // Иначе внутри одного блока появляется разрыв при переходе через
-            // границу torus.
-
             int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
                          (int)blockIdx.y * wszblock + wszblock / 2};
 
             int2 cob_shift = {wcob.x * 8 + shift.x, wcob.y * 8 + shift.y};
-
             int2 cobc = {cob_shift.x - hszfld, cob_shift.y - hszfld};
             cobc = wrap_toroid0(cobc, szfld);
-
             int2 fldc_raw = {fld_shift.x - hszfld, fld_shift.y - hszfld};
 
             // wrap относительно центра блока
@@ -393,33 +372,29 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             df = wrap_toroid0(df, szfld);
 
             int2 fldc = {cobc.x + df.x, cobc.y + df.y};
-            // --- end chatgpt
-
             int2 rotc = rotate_device(fldc, d_rotates);
-
-            if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
-               threadIdx.y == 1 && nbit == 7) {
+            
+            bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
+               threadIdx.y == 1 && nbit == 7;
+            if(err_dump) {
               printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
                      blockIdx.y, threadIdx.x, threadIdx.y, nbit);
-              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d\nrotc:%d %d [%d,%d)\n",
+              printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d\nrotc:%d %d "
+                     "[%d,%d)\n",
                      fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
                      rotc.x, rotc.y, -hsz0, hsz0);
             }
-
             // rotc — проекция на subdata в центрированных координатах.
             // Если вне subdata, ничего не пишем.
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
-
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
 
-            if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
-               threadIdx.y == 1 && nbit == 7) {
+            if(err_dump) 
               printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
                      wshr.y, wszshared);
-            }
 
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
                wshr.y >= wszshared)
@@ -429,13 +404,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
-            if(blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
-               threadIdx.y == 1 && nbit == 7) {
-              printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
-                     blockIdx.y, threadIdx.x, threadIdx.y, nbit);
+            if(err_dump) 
               printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
                      idwshared, val_shared, shift_bit, val_bit);
-            }
           }
           field[idw] = tile_field;
         } // threadIdx.x
