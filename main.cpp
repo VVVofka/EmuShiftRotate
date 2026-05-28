@@ -372,9 +372,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fldc = {cobc.x + df.x, cobc.y + df.y};
             int2 rotc = rotate_device(fldc, d_rotates);
-            
-            bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 && threadIdx.x == 1 &&
-               threadIdx.y == 1 && nbit == 7;
+
+            bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 &&
+                            threadIdx.x == 1 && threadIdx.y == 1 && nbit == 7;
             if(err_dump) {
               printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
                      blockIdx.y, threadIdx.x, threadIdx.y, nbit);
@@ -388,22 +388,28 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
+
             int2 shr = {rotc.x - base.x, rotc.y - base.y};
             int2 wshr = {shr.x / 8, shr.y / 8};
 
-            if(err_dump) 
+            if(err_dump)
               printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
                      wshr.y, wszshared);
 
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
                wshr.y >= wszshared)
               continue;
+
+            if(err_dump)
+              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
+                     wshr.y, wszshared);
+
             int idwshared = wshr.y * wszshared + wshr.x;
             uint64_t val_shared = s_sub[idwshared];
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
-            if(err_dump) 
+            if(err_dump)
               printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
                      idwshared, val_shared, shift_bit, val_bit);
           }
@@ -422,7 +428,7 @@ int emu(int sz0, int2 shift, float angle) {
   int ret = 0;
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
-  
+
   u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
   // if need to visual different axes
   // vsubdata[5] = 1ULL << 21;
