@@ -457,10 +457,22 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {15, 0}, 45.0f))
-    return 1;
-  if(emu(32, {5, 0}, 45.0f))
+  if(emu(64, {-26, -39}, -16.0f))
     return 2;
+
+  int sz0 = 32;
+  while(sz0 <= 1024) {
+    int szfld = sz0 * 3 / 2;
+    for(int attempt = 0; attempt < 10; attempt++) {
+      int2 shift = {rand() % szfld - szfld / 2, rand() % szfld - szfld / 2};
+      float angle = rand() % 90 - 45.0f;
+      float kfill = (rand() % 100) / 100.0f;
+      if(emu(sz0, shift, angle, kfill, true))
+        return 1;
+    }
+    printf("test sz0=%d Ok\n", sz0);
+    sz0 *= 2;
+  }
   printf("All tests Ok\n");
   return 0;
 } // --------------------------------------------------------------------------
