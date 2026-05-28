@@ -21,7 +21,6 @@ typedef vector<uint64_t> u64vector;
 typedef vector<int2> ivector;
 
 constexpr float sqrt2 = 1.41421356237f;
-constexpr float half_sqrt2 = sqrt2 * 0.5f;
 
 int2 wrap_toroid(int2 val, int sz) {
   if(val.x < 0)
@@ -423,10 +422,13 @@ int emu(int sz0, int2 shift, float angle) {
   int ret = 0;
   int szfld = sz0 * 3 / 2;
   float2 d_rotates = get_d_rotates(angle);
+  
   u64vector vsubdata(sz0 * sz0 / 64, ~0ULL); // fill with ones
+  // if need to visual different axes
   // vsubdata[5] = 1ULL << 21;
   // vsubdata[10] = (1ULL << 42) | (1ULL << 41);
   // vsubdata[15] = (1ULL << 63) | (1ULL << 62) | (1ULL << 61);
+
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
@@ -446,8 +448,10 @@ int emu(int sz0, int2 shift, float angle) {
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(32, {5, 0}, 45.0f))
+  if(emu(32, {15, 0}, 45.0f))
     return 1;
+  if(emu(32, {5, 0}, 45.0f))
+    return 2;
   printf("All tests Ok\n");
   return 0;
 } // --------------------------------------------------------------------------
