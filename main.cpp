@@ -35,15 +35,27 @@ int2 wrap_toroid(int2 val, int sz) {
 } // --------------------------------------------------------------------------
 int2 wrap_toroid0(int2 val, int sz) {
   int sz2 = sz / 2;
-  if(val.x < -sz2)
+  while(val.x < -sz2)
     val.x += sz;
-  if(val.x >= sz2)
+  while(val.x >= sz2)
     val.x -= sz;
-  if(val.y < -sz2)
+  while(val.y < -sz2)
     val.y += sz;
-  if(val.y >= sz2)
+  while(val.y >= sz2)
     val.y -= sz;
   return val;
+} // --------------------------------------------------------------------------
+int2 wrap_relative(int2 val, int2 base, int sz) {
+  int2 res = {val.x - base.x, val.y - base.y};
+  while(res.x < 0)
+    res.x += sz;
+  while(res.x >= sz)
+    res.x -= sz;
+  while(res.y < 0)
+    res.y += sz;
+  while(res.y >= sz)
+    res.y -= sz;
+  return res;
 } // --------------------------------------------------------------------------
 int __float2int_rn(float f) {
   return int(roundf(f));
@@ -358,19 +370,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
-                         (int)blockIdx.y * wszblock + wszblock / 2};
-
-            int2 cob_shift = {wcob.x * 8 + shift.x, wcob.y * 8 + shift.y};
-            int2 cobc = {cob_shift.x - hszfld, cob_shift.y - hszfld};
-            cobc = wrap_toroid0(cobc, szfld);
-            int2 fldc_raw = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-
-            // wrap относительно центра блока
-            int2 df = {fldc_raw.x - cobc.x, fldc_raw.y - cobc.y};
-            df = wrap_toroid0(df, szfld);
-
-            int2 fldc = {cobc.x + df.x, cobc.y + df.y};
+            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
+            fldc = wrap_toroid0(fldc, szfld);
+            
             int2 rotc = rotate_device(fldc, d_rotates);
 
             bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 &&
@@ -388,8 +390,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
+            if(err_dump)
+              printf("rotc check Ok\n");
 
-            int2 shr = {rotc.x - base.x, rotc.y - base.y};
+            int2 shr = wrap_relative(rotc, base, sz0);
             int2 wshr = {shr.x / 8, shr.y / 8};
 
             if(err_dump)
@@ -401,8 +405,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
               continue;
 
             if(err_dump)
-              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
-                     wshr.y, wszshared);
+              printf("wshr check Ok\n");
 
             int idwshared = wshr.y * wszshared + wshr.x;
             uint64_t val_shared = s_sub[idwshared];
