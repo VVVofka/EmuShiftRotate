@@ -8,5 +8,16 @@ endif()
 
 project ("CMakeSimply1")
 
-add_executable (EmuShiftRotate "main.cpp")
+# Определяем файлы исходного кода
+set(SOURCES
+    main.cpp
+    NoShared/rotate.cpp
+)
+
+set(HEADERS
+  NoShared/rotate.h
+  NoShared/emu_vector_types.h
+)
+
+add_executable (${PROJECT_NAME} ${SOURCES} ${HEADERS})
 

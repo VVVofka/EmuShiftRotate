@@ -3,18 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
-
-// types as in CUDA
-struct int2 {
-  int x, y;
-};
-struct float2 {
-  float x, y;
-};
-struct dim3 {
-  unsigned x, y, z;
-  dim3(unsigned a = 1, unsigned b = 1, unsigned c = 1) { x = a, y = b, z = c; }
-};
+#include "NoShared/rotate.h"
 
 using std::vector;
 typedef vector<uint64_t> u64vector;
@@ -440,7 +429,7 @@ int2 findFirstErr(int sz0, int2 shift, float angle) {
     auto vshared = push<wszblock>(vsub, vfld, shift, d_rotates);
     int sumsub = sum1(vsub);
     if(sumsub != 1) {
-      printf("sumsub:%d  sumshared:%d\n", sumsub, sum1(vshared));
+      //printf("sumsub:%d  sumshared:%d\n", sumsub, sum1(vshared));
       return {w, offset};
     }
 
