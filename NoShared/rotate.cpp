@@ -107,8 +107,9 @@ RotateShiftHost::convert_raw_morton(const std::vector<uint64_t> &v) {
   return vret;
 } // --------------------------------------------------------------------------
 
-bool RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
-                                      const std::vector<int> &vfield) {
+int RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
+                                     const std::vector<int> &vfield) {
+  int ret = -1;
   int wsz = int(sqrt(static_cast<double>(vrawfield.size())));
   int szfld = int(sqrt(static_cast<double>(vfield.size())));
   assert(wsz * 8 == szfld);
@@ -123,6 +124,8 @@ bool RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
           int x = wx * 8 + bx;
           int idx = y * szfld + x;
           if(bit && vfield[idx] < 0 || !bit && vfield[idx] >= 0) {
+            if(ret == - 1)
+              ret = idx;
             if(++cnterr < 4)
               printf("check_raw_field error x=%d y=%d idx=%d raw=%d tst=%d\n",
                      x, y, idx, bit, vfield[idx]);
@@ -132,17 +135,15 @@ bool RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
     }
   }
   printf("check_raw_field errors=%d\n", cnterr);
-  return cnterr == 0;
+  return ret;
 } // --------------------------------------------------------------------------
 
-bool RotateShiftHost::check_raw(float angle, int2 shift,
-                                const std::vector<uint64_t> &vrawsubdata,
-                                const std::vector<uint64_t> &vrawfield) {
+int RotateShiftHost::check_raw(float angle, int2 shift,
+                               const std::vector<uint64_t> &vrawsubdata,
+                               const std::vector<uint64_t> &vrawfield) {
   std::vector<int> vsubdata = convert_raw_morton(vrawsubdata);
   std::vector<int> vfield = push(angle, shift, vsubdata);
-  if(!check_raw_field(vrawfield, vfield))
-    return false;
-  return true;
+  return check_raw_field(vrawfield, vfield);
 } // --------------------------------------------------------------------------
 
 std::vector<int> RotateShiftHost::def_subdata(int sz0) {

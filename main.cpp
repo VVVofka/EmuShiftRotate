@@ -81,13 +81,6 @@ uint32_t morton_encode(int2 i2) {
 void replace_bit(uint64_t &val, uint32_t idx_bit, uint32_t val_bit) {
   val = (val & ~(1ull << idx_bit)) | (uint64_t(val_bit) << idx_bit);
 } // --------------------------------------------------------------------------
-int sum1(const u64vector &v) {
-  int sum = 0;
-  for(int i = 0; i < v.size(); ++i)
-    for(int j = 0; j < 64; ++j)
-      sum += int((v[i] >> j) & 1ULL);
-  return sum;
-} // --------------------------------------------------------------------------
 float2 get_d_rotates(float angle_deg) {
   constexpr float to_rad = 3.14159265358979f / 180.0f;
   float angle_rad = angle_deg * to_rad;
@@ -251,6 +244,10 @@ subdata.
 2.6 Сохраняем бит во временную переменную
 2.7 После цикла сохраняем временную переменную в field
 */
+// for debug
+ivector vfld_base0;        // single variable in cuda
+vector<ivector> vsrcshmem; // sources
+
 template <int wszblock = 2>
 vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                        float2 d_rotates) {
@@ -274,7 +271,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
   // emulation of shared memory
   vector<u64vector> vshared(gridDim.x * gridDim.y);
-  vector<ivector> vsrcshmem(vshared.size()); // sources
+  vsrcshmem.resize(vshared.size());         // sources
+  vfld_base0.resize(gridDim.x * gridDim.y); // single variable in cuda
 
   constexpr int szshall = wszshared * wszshared;
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++)
@@ -283,7 +281,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       vshared[idx].resize(szshall, 0ULL);
       vsrcshmem[idx].resize(szshall, {INT_MAX, INT_MAX});
     }
-  ivector vfld_base0(gridDim.x * gridDim.y); // single variable in cuda
 
   uint64_t *field = vfield.data();
 
@@ -447,20 +444,23 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
-  bool success = RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
-  if(success) {
+  int id_first_err = RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
+  if(id_first_err == -1) {
     if(verbose)
       printf("test Ok\n");
     return 0;
   }
   if(sz0 <= 32) {
+    dump_base(vfld_base0);
     dump_shmem(vshared);
+    dump_src_shmem(vsrcshmem);
     dump(vfield);
   }
   return 1;
 } // --------------------------------------------------------------------------
 
 int main() {
+  return emu(32, {20,0}, 0.0f, 0.5f, true);
   srand(999);
   int sz0 = 32;
   while(sz0 <= 1024) {

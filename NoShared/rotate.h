@@ -59,10 +59,10 @@ std::vector<int> convert_raw_morton(const std::vector<uint64_t> &vrawsubdata);
 // @param vfield поле размером 1.5*sz0 возвращаемое из push() 1 значение /
 // элемент
 // @note Выводит 5 первых ошибок в консоль
-bool check_raw_field(const std::vector<uint64_t> &vrawfield,
+int check_raw_field(const std::vector<uint64_t> &vrawfield,
                      const std::vector<int> &vfield);
 
-bool check_raw(float angle, int2 shift,
+int check_raw(float angle, int2 shift,
     const std::vector<uint64_t> &vrawsubdata,
                const std::vector<uint64_t> &vrawfield);
 } // namespace RotateShiftHost
