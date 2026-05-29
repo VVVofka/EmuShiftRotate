@@ -1,6 +1,6 @@
 #pragma once
 #include "emu_vector_types.h"
-#include <stdint.h>
+#include <cstdint>
 #include <vector>
 
 // @brief Пространство имен RotateShiftHost для поворота квадратов

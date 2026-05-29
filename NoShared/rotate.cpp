@@ -1,6 +1,7 @@
 #include "rotate.h"
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 int2 RotateShiftHost::rotate(int2 sub, float2 k) {
