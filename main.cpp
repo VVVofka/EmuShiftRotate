@@ -460,7 +460,7 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
 } // --------------------------------------------------------------------------
 
 int main() {
-  return emu(32, {20,0}, 0.0f, 0.5f, true);
+  //return emu(32, {20,0}, 0.0f, 0.5f, true);
   srand(999);
   int sz0 = 32;
   while(sz0 <= 1024) {
