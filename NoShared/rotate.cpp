@@ -123,8 +123,9 @@ bool RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
           int x = wx * 8 + bx;
           int idx = y * szfld + x;
           if(bit && vfield[idx] < 0 || !bit && vfield[idx] >= 0) {
-            if(++cnterr < 5)
-              printf("check_raw_field error %d %d (%d)\n", x, y, idx);
+            if(++cnterr < 4)
+              printf("check_raw_field error x=%d y=%d idx=%d raw=%d tst=%d\n",
+                     x, y, idx, bit, vfield[idx]);
           }
         }
       }

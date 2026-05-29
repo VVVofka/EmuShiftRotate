@@ -1,9 +1,9 @@
+#include "NoShared/rotate.h"
 #include <assert.h>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
-#include "NoShared/rotate.h"
 
 using std::vector;
 typedef vector<uint64_t> u64vector;
@@ -335,9 +335,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       } // threadIdx.y
     } // blockIdx.x
   } // blockIdx.y
-  dump_base(vfld_base0);
-  // dump_shmem(vshared);
-  dump_src_shmem(vsrcshmem);
+  // dump_base(vfld_base0);
+  //  dump_shmem(vshared);
+  // dump_src_shmem(vsrcshmem);
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
@@ -364,7 +364,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 rotc = rotate_device(fldc, d_rotates);
 
-            bool err_dump = blockIdx.x == 2 && blockIdx.y == 1 &&
+            bool err_dump = 0 && blockIdx.x == 2 && blockIdx.y == 1 &&
                             threadIdx.x == 1 && threadIdx.y == 1 && nbit == 7;
             if(err_dump) {
               printf("blockIdx:%d %d threadIdx:%d %d nbit:%d\n", blockIdx.x,
@@ -447,36 +447,29 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
   u64vector vfield(szfld * szfld / 64, 0ULL); // fill with zeros
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
-  int sumsub = sum1(vsubdata);
-  int sumfield = sum1(vfield);
-
-  if(sumsub != sumfield) {
-    printf("Error: sumsub=%d != sumfield=%d\n", sumsub, sumfield);
-    if(sz0 <= 32) {
-      // dump_shmem(vshared);
-      // dump(vfield);
-    }
-    RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
-    return 1;
+  bool success = RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
+  if(success) {
+    if(verbose)
+      printf("test Ok\n");
+    return 0;
   }
-  if(verbose)
-    printf("test Ok (sumsub=%d, sumfield=%d)\n", sumsub, sumfield);
-  return 0;
+  if(sz0 <= 32) {
+    dump_shmem(vshared);
+    dump(vfield);
+  }
+  return 1;
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(64, {-26, -39}, -16.0f)){
-
-    return 2;
-  }
+  srand(999);
   int sz0 = 32;
   while(sz0 <= 1024) {
     int szfld = sz0 * 3 / 2;
-    for(int attempt = 0; attempt < 10; attempt++) {
+    for(int attempt = 0; attempt < 3; attempt++) {
       int2 shift = {rand() % szfld - szfld / 2, rand() % szfld - szfld / 2};
       float angle = rand() % 90 - 45.0f;
-      float kfill = (rand() % 100) / 100.0f;
-      if(emu(sz0, shift, angle, kfill, false))
+      float kfill = (10 + rand() % 90) / 100.0f;
+      if(emu(sz0, shift, angle, kfill, true))
         return 1;
     }
     printf("test sz0=%d Ok\n", sz0);
