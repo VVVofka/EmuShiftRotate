@@ -134,6 +134,16 @@ bool RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
   return cnterr == 0;
 } // --------------------------------------------------------------------------
 
+bool RotateShiftHost::check_raw(float angle, int2 shift,
+                                const std::vector<uint64_t> &vrawsubdata,
+                                const std::vector<uint64_t> &vrawfield) {
+  std::vector<int> vsubdata = convert_raw_morton(vrawsubdata);
+  std::vector<int> vfield = push(angle, shift, vsubdata);
+  if(!check_raw_field(vrawfield, vfield))
+    return false;
+  return true;
+} // --------------------------------------------------------------------------
+
 std::vector<int> RotateShiftHost::def_subdata(int sz0) {
   std::vector<int> v(sz0 * sz0);
   for(int y = 0; y < sz0; y++)

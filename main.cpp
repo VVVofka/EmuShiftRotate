@@ -414,30 +414,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   return vshared;
 } // --------------------------------------------------------------------------
 
-int2 findFirstErr(int sz0, int2 shift, float angle) {
-  int szfld = sz0 * 3 / 2;
-  int wszfld = szfld / 8;
-  u64vector vsub(sz0 * sz0 / 64, 0ULL);
-  for(int i = 0; i < sz0 * sz0; i++) {
-    u64vector vfld(wszfld * wszfld, 0ULL);
-    int w = i / 64;
-    int offset = i % 64;
-    vsub[w] = (1ULL << offset);
-
-    float2 d_rotates = get_d_rotates(angle);
-    constexpr int wszblock = 2; // for debug, default is 16
-    auto vshared = push<wszblock>(vsub, vfld, shift, d_rotates);
-    int sumsub = sum1(vsub);
-    if(sumsub != 1) {
-      //printf("sumsub:%d  sumshared:%d\n", sumsub, sum1(vshared));
-      return {w, offset};
-    }
-
-    vsub[w] = 0ULL;
-  }
-  return {-1, -1};
-} // --------------------------------------------------------------------------
-
 int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
         bool verbose = true) {
   if(verbose)
@@ -480,6 +456,7 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
       // dump_shmem(vshared);
       // dump(vfield);
     }
+    RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
     return 1;
   }
   if(verbose)
@@ -488,9 +465,10 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
 } // --------------------------------------------------------------------------
 
 int main() {
-  if(emu(64, {-26, -39}, -16.0f))
-    return 2;
+  if(emu(64, {-26, -39}, -16.0f)){
 
+    return 2;
+  }
   int sz0 = 32;
   while(sz0 <= 1024) {
     int szfld = sz0 * 3 / 2;

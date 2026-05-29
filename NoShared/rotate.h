@@ -51,14 +51,18 @@ void dump_field(const std::vector<int> &vfield, int2 shift = {0, 0});
 int check(const std::vector<int> &vfield);
 
 // @brief Преобразование Z 1-битовых данных в вектор для push()
-std::vector<int> convert_raw_morton(const std::vector<uint64_t> &v);
+std::vector<int> convert_raw_morton(const std::vector<uint64_t> &vrawsubdata);
 
 // @brief Сравнение внешних битовых данных и возвращаемого вектора из push()
 // @return true, если ошибок нет
 // @param vrawfield внешнее поле размером 8*8 значения / элемент
-// @param vfield поле размером 1.5*sz0 возвращаемое из push() 1 значение / элемент
+// @param vfield поле размером 1.5*sz0 возвращаемое из push() 1 значение /
+// элемент
 // @note Выводит 5 первых ошибок в консоль
 bool check_raw_field(const std::vector<uint64_t> &vrawfield,
                      const std::vector<int> &vfield);
 
+bool check_raw(float angle, int2 shift,
+    const std::vector<uint64_t> &vrawsubdata,
+               const std::vector<uint64_t> &vrawfield);
 } // namespace RotateShiftHost
