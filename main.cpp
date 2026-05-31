@@ -281,7 +281,6 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       vshared[idx].resize(szshall, 0ULL);
       vsrcshmem[idx].resize(szshall, {INT_MAX, INT_MAX});
     }
-
   uint64_t *field = vfield.data();
 
   assert(wsz0 * wsz0 == vsubdata.size());
@@ -291,47 +290,44 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
       int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
+      int2 &basec = vfld_base0[idblock];
       u64vector &s_sub = vshared[idblock]; // shared memory for block
 
-      // center of block (cob) in words
-      int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
-                   (int)blockIdx.y * wszblock + wszblock / 2};
+      // begin of block in words
+      int2 wbase0 = {(int)blockIdx.x * wszblock, (int)blockIdx.y * wszblock};
+      int2 base0shift = {wbase0.x * 8 + shift.x, wbase0.y * 8 + shift.y};
+      int2 base0torc = wrap_toroid(base0shift, szfld);
+      int2 base0c = {base0torc.x - hszfld, base0torc.y - hszfld};
+      int2 baserotc = rotate_device(base0c, d_rotates);
 
-      int cobx = wcob.x * 8 + shift.x;
-      int coby = wcob.y * 8 + shift.y;
-      int2 cobc = {cobx - hszfld, coby - hszfld};
-      cobc = wrap_toroid0(cobc, szfld); // qwen
-
-      // qwen
-int2 cobrotc = rotate_device(cobc, d_rotates);
-       int2 cobrotc_floor = floor8({cobrotc.x + 4, cobrotc.y + 4});
-       int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
-
-       vfld_base0[idblock] = basec;
-
-       // DEBUG: Check if shared memory covers all possible rotc values
-       // For rotc in [-hsz0, hsz0), we need shr in [-szblock, szblock)
-       // But wrap_relative can produce values in [-sz0, sz0) which is much larger
-       int2 wbasec = {floor8(basec.x) / 8, floor8(basec.y) / 8};
-       
-       // For debugging: print block 2 base
-       if(idblock == 2) {
-         printf("DEBUG block 2: wcob:(%d,%d) cobc:(%d,%d) cobrotc:(%d,%d) basec:(%d,%d) wbasec:(%d,%d)\n",
-                wcob.x, wcob.y, cobc.x, cobc.y, cobrotc.x, cobrotc.y, basec.x, basec.y, wbasec.x, wbasec.y);
-       }
-
-       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
+      if(d_rotates.x >= d_rotates.y) { // angle >= 0 против часовой стрелки
+        // для получения минимального X поворачиваем левый верхний угол
+        int2 baseshift = {wbase0.x * 8 + shift.x, wbase0.y * 8 + shift.y + szblock - 1};
+        int2 basec = {baseshift.x - hszfld, baseshift.y - hszfld};
+        int2 wrapc = wrap_toroid0(basec, szfld);
+        baserotc.x = rotate_device(wrapc, d_rotates).x;
+      } else { // angle < 0 по часовой стрелке
+        // для получения минимального Y поворачиваем нижний правый угол
+        int2 baseshift = {wbase0.x * 8 + shift.x + szblock - 1, wbase0.y * 8 + shift.y};
+        int2 basec = {baseshift.x - hszfld, baseshift.y - hszfld};
+        int2 wrapc = wrap_toroid0(basec, szfld);
+        baserotc.y = rotate_device(wrapc, d_rotates).y;
+      }
+      int2 base_floorc = floor8(baserotc);
+      int2 basewrapc = wrap_toroid0(base_floorc, szfld);
+      basec = basewrapc;
+      int2 base_sub = {basewrapc.x + hsz0, basewrapc.y + hsz0};
+      //if(base_sub.x < 0 || base_sub.y < 0)        continue;
+      int2 wbase_sub = {base_sub.x / 8, base_sub.y / 8};
+      for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
           // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
-            int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
-
-            // toroidal wrap в координатах subdata относительно центра
-            wsubc_cart = wrap_toroid0(wsubc_cart, sz0 / 8);
-
-            int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
+            int2 wsub_cart = {wbase_sub.x + wshared.x, wbase_sub.y + wshared.y};
+            if(wsub_cart.x < 0 || wsub_cart.y < 0 || wsub_cart.x >= wsz0 || wsub_cart.y >= wsz0)
+              continue;
             auto idw_sub_morton = morton_encode(wsub_cart);
             int idshared = wshared.y * wszshared + wshared.x;
             s_sub[idshared] = subdata[idw_sub_morton];
@@ -342,15 +338,15 @@ int2 cobrotc = rotate_device(cobc, d_rotates);
     } // blockIdx.x
   } // blockIdx.y
   // dump_base(vfld_base0);
-  //  dump_shmem(vshared);
+  // dump_shmem(vshared);
   // dump_src_shmem(vsrcshmem);
 
   // copy shared memory to global memory
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
       const int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
-      int2 &base = vfld_base0[idblock];
-      u64vector &s_sub = vshared[idblock];
+      const int2 &basec = vfld_base0[idblock];
+      const u64vector &s_sub = vshared[idblock];
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
           int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
@@ -362,15 +358,10 @@ int2 cobrotc = rotate_device(cobc, d_rotates);
           // #pragma unroll
           for(int nbit = 0; nbit < 64; ++nbit) {
             int2 bit = {nbit & 7, nbit >> 3};
-
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
-            // NoShared uses: flds = (szfield + fld + shift) % szfield, then fldc = flds - szfield/2
-            // Main uses: fld_shift = fld + shift, then fldc = fld_shift - hszfld
-            // These are equivalent for shift in [-szfield/2, szfield/2)
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
             fldc = wrap_toroid0(fldc, szfld);
-
             int2 rotc = rotate_device(fldc, d_rotates);
 
             bool err_dump = 0 && blockIdx.x == 2 && blockIdx.y == 1 &&
@@ -383,68 +374,37 @@ int2 cobrotc = rotate_device(cobc, d_rotates);
                      fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
                      rotc.x, rotc.y, -hsz0, hsz0);
             }
-// rotc — проекция на subdata в центрированных координатах.
+            // rotc — проекция на subdata в центрированных координатах.
             // Если вне subdata, ничего не пишем.
             if(rotc.x < -hsz0 || rotc.y < -hsz0 || rotc.x >= hsz0 ||
                rotc.y >= hsz0)
               continue;
 
-// DEBUG: Compare with NoShared algorithm
-            int2 sub_expected = {(rotc.x + hsz0 + sz0) % sz0, (rotc.y + hsz0 + sz0) % sz0}; // NoShared uses sz0/2
-            int2 shr_raw = {rotc.x - base.x, rotc.y - base.y}; // before wrap_relative
-            int2 shr = wrap_relative(rotc, base, sz0);
+            int2 shr;
+            if(rotc.x >= basec.x) { // нет переноса через границу тора field
+              shr.x = rotc.x - basec.x;
+            } else { // перенос через границу тора field
+              shr.x = szfld + rotc.x - basec.x;
+            }
+            if(rotc.y >= basec.y) { // нет переноса через границу тора field
+              shr.y = rotc.y - basec.y;
+            } else { // перенос через границу тора field
+              shr.y = szfld + rotc.y - basec.y;
+            }
             int2 wshr = {shr.x / 8, shr.y / 8};
-
-            // The key issue: wrap_relative wraps to [0, sz0), but we need to check if the value
-            // is in the shared memory region [base, base + szshared)
-            // 
-            // If shr_raw is in [-szshared, szshared) relative to base, then the wrapped shr should be valid.
-            // But if the value wrapped around the torus, it may not be covered by shared memory.
-            //
-            // Solution: use shr_raw for the bounds check, but handle the wrap case
-
-            // Check if shr_raw (before wrapping) is in the shared memory range
-            bool shr_raw_in_shared = (shr_raw.x >= -szshared && shr_raw.x < szshared &&
-                                      shr_raw.y >= -szshared && shr_raw.y < szshared);
-            
-            // If shr_raw is outside shared memory range but shr is in subdata bounds,
-            // this means wrap_relative wrapped the value to a different location
-            if(!shr_raw_in_shared) {
-              int blk_id = blockIdx.y * gridDim.x + blockIdx.x;
-              if(blk_id == 2 && nbit == 7) {
-                printf("SKIP: shr_raw:(%d,%d) out of shared memory range [-%d,%d)\n",
-                       shr_raw.x, shr_raw.y, szshared, szshared);
-              }
-              continue;
-            }
-
-            bool wshr_check = wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared || wshr.y >= wszshared;
-            if(wshr_check && (rotc.x >= -hsz0 && rotc.y >= -hsz0 && rotc.x < hsz0 && rotc.y < hsz0)) {
-              // This should NOT happen - rotc is in bounds but wshr is out of shared memory range
-              // Print detailed error for block 2
-              int blk_id = blockIdx.y * gridDim.x + blockIdx.x;
-              if(blk_id == 2) {
-                printf("ERROR: blk_id=%d wshr out of bounds! rotc:(%d,%d) base:(%d,%d) shr:(%d,%d) wshr:(%d,%d) wszshared:%d\n",
-                       blk_id, rotc.x, rotc.y, base.x, base.y, shr.x, shr.y, wshr.x, wshr.y, wszshared);
-              }
-              continue;
-            }
-            if(err_dump)
-              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
-                     wshr.y, wszshared);
-
-            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
-               wshr.y >= wszshared)
-              continue;
-
-            if(err_dump)
-              printf("wshr check Ok\n");
-
             int idwshared = wshr.y * wszshared + wshr.x;
             uint64_t val_shared = s_sub[idwshared];
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
+            if(err_dump)
+              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
+                     wshr.y, wszshared);
+            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
+               wshr.y >= wszshared)
+              continue;
+            if(err_dump)
+              printf("wshr check Ok\n");
             if(err_dump)
               printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
                      idwshared, val_shared, shift_bit, val_bit);
@@ -465,8 +425,8 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
            shift.y, angle, kfill);
   int ret = 0;
   int szfld = sz0 * 3 / 2;
-  float2 d_rotates = get_d_rotates(-angle); // FIX: negate angle to match NoShared
-
+  float2 d_rotates =
+      get_d_rotates(-angle); // FIX: negate angle to match NoShared
   // DEBUG: Find the exact error location
   int id_first_err_debug = -1;
 
@@ -495,6 +455,7 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
   constexpr int wszblock = 2;                 // for debug, default is 16
   auto vshared = push<wszblock>(vsubdata, vfield, shift, d_rotates);
   int id_first_err = RotateShiftHost::check_raw(angle, shift, vsubdata, vfield);
+  dump(vfield);
   if(id_first_err == -1) {
     if(verbose)
       printf("test Ok\n");
@@ -510,7 +471,7 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
 } // --------------------------------------------------------------------------
 
 int main() {
-  //return emu(32, {20,30}, 0.0f, 0.5f, true);
+  return emu(32, {15, 15}, -0.0f, 1.0f, true);
   srand(999);
   int sz0 = 32;
   while(sz0 <= 1024) {
