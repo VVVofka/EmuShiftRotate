@@ -302,26 +302,22 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
       if(d_rotates.x >= d_rotates.y) { // angle >= 0 против часовой стрелки
         // для получения минимального X поворачиваем левый верхний угол
-        int2 baseshift = {wbase0.x * 8 + shift.x, wbase0.y * 8 + shift.y + szblock - 1};
-        int2 basec = {baseshift.x - hszfld, baseshift.y - hszfld};
-        int2 wrapc = wrap_toroid0(basec, szfld);
-        baserotc.x = rotate_device(wrapc, d_rotates).x;
+        int2 left_top = {base0c.x, base0c.y + szblock - 1};
+        baserotc.x = rotate_device(left_top, d_rotates).x; // left top x
       } else { // angle < 0 по часовой стрелке
         // для получения минимального Y поворачиваем нижний правый угол
-        int2 baseshift = {wbase0.x * 8 + shift.x + szblock - 1, wbase0.y * 8 + shift.y};
-        int2 basec = {baseshift.x - hszfld, baseshift.y - hszfld};
-        int2 wrapc = wrap_toroid0(basec, szfld);
-        baserotc.y = rotate_device(wrapc, d_rotates).y;
+        int2 right_bottom = {base0c.x + szblock - 1, base0c.y};
+        baserotc.y = rotate_device(right_bottom, d_rotates).y; // left top x
       }
-      int2 base_floorc = floor8(baserotc);
-      int2 basewrapc = wrap_toroid0(base_floorc, szfld);
-      basec = basewrapc;
+      basec = floor8(baserotc);
+
+      // fill shared memory. 4 values per thread
+      int2 basewrapc = wrap_toroid(basec, szfld);
       int2 base_sub = {basewrapc.x + hsz0, basewrapc.y + hsz0};
       //if(base_sub.x < 0 || base_sub.y < 0)        continue;
       int2 wbase_sub = {base_sub.x / 8, base_sub.y / 8};
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
-          // fill shared memory. 4 values per thread
           for(int j = 0; j < 4; j++) {
             int2 wshared = {int(threadIdx.x) * 2 + j % 2,
                             int(threadIdx.y) * 2 + j / 2};
