@@ -200,6 +200,8 @@ std::vector<int> RotateShiftHost::push(float angle, int2 shift,
   int2 flds; // shifted field
   // printf("\nfld.y;fld.x;fldc.y;fldc.x;sub.y;sub.x;subc.y;subc.x;idfield;idsub;field;"
   //        "subdata\n");
+
+  dbdbg.create(vsubdata);
   for(fld.y = 0; fld.y < szfield; fld.y++) {
     flds.y = (szfield + fld.y + shift.y) % szfield;
     fldc.y = flds.y - szfield / 2;

@@ -9,14 +9,16 @@ endif()
 project("EmuShiftRotate")
 
 # Определяем файлы исходного кода
-set(SOURCES
-  main.cpp
-  NoShared/rotate.cpp
-)
-
 set(HEADERS
   NoShared/rotate.h
   NoShared/emu_vector_types.h
+  NoShared/dbdbg.h
+)
+
+set(SOURCES
+  main.cpp
+  NoShared/rotate.cpp
+  NoShared/dbdbg.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES} ${HEADERS})
