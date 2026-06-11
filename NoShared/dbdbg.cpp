@@ -27,8 +27,7 @@ void DbDbg::create(const std::vector<uint64_t> &v_subdata) {
       RowDbDbg &r = vrows[i];
       r.id_subdata_morton = z;
       r.subdata.id = i;
-      r.subdata.x = x;
-      r.subdata.y = y;
+      r.subdata = {x, y};
       r.val = uint32_t(v_subdata[z / 64] >> (z % 64)) & 1;
     }
   }
@@ -42,14 +41,15 @@ void DbDbg::create(const std::vector<int> &v_subdata) {
 
   for(int y = 0; y < sz0; y++) {
     for(int x = 0; x < sz0; x++) {
+      int2 sub = {x, y};
       int i = y * sz0 + x;
       int z = morton_encode(x, y);
       RowDbDbg &r = vrows[i];
-      r.id_subdata_morton = z;
       r.subdata.id = i;
-      r.subdata.x = x;
-      r.subdata.y = y;
-      r.val = uint32_t(v_subdata[z / 64] >> (z % 64)) & 1;
+      r.id_subdata_morton = z;
+      r.subdata.xy = sub;
+      r.val = v_subdata[i];
+      r.a.xy = {x - sz0 / 2, y - sz0 / 2};
     }
   }
 } // --------------------------------------------------------------------------
@@ -70,7 +70,7 @@ RowDbDbg *DbDbg::find_by_field(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
-    if(r.field.x == x && r.field.y == y)
+    if(r.field.xy.x == x && r.field.xy.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------
@@ -87,7 +87,7 @@ RowDbDbg *DbDbg::find_by_b(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
-    if(r.b.x == x && r.b.y == y)
+    if(r.b.xy.x == x && r.b.xy.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------
@@ -104,7 +104,7 @@ RowDbDbg *DbDbg::find_by_a(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
-    if(r.a.x == x && r.a.y == y)
+    if(r.a.xy.x == x && r.a.xy.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------

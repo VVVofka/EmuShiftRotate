@@ -2,14 +2,14 @@
 #include "emu_vector_types.h"
 #include <cstdint>
 #include <vector>
-#include "dbdbg.h"
+//#include "dbdbg.h"
 
 // @brief Пространство имен RotateShiftHost для поворота квадратов
 // без потери и дублирования данных
 // @note Это Host версия - нужна для экспериментов и отладки.
 // @note Реализация для CUDA-версии - rotate_shift.h
 namespace RotateShiftHost {
-DbDbg dbdbg;
+//DbDbg dbdbg;
 
 // @brief Основная функция:
 // shear поворот по центру против часовой стрелки

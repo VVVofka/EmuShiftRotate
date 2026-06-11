@@ -125,7 +125,7 @@ int RotateShiftHost::check_raw_field(const std::vector<uint64_t> &vrawfield,
           int x = wx * 8 + bx;
           int idx = y * szfld + x;
           if(bit && vfield[idx] < 0 || !bit && vfield[idx] >= 0) {
-            if(ret == - 1)
+            if(ret == -1)
               ret = idx;
             if(++cnterr < 4)
               printf("check_raw_field error x=%d y=%d idx=%d raw=%d tst=%d\n",
@@ -192,16 +192,16 @@ std::vector<int> RotateShiftHost::push(float angle, int2 shift,
 
   int2 fld;  // не центрированное поле со сдвигом [0..szfield-1]
   int2 fldc; // центрированное поле [-szfield/2..szfield/2-1]
-  int2 subc; // центрированное субполе [-sz0/2..sz0/2-1] (включая точки которые
-             // ему не принадлежат)
-  int2
-      sub; // не центрированное субполе [0..sz0-1] (включая точки которые ему не
-  // принадлежат)
-  int2 flds; // shifted field
-  // printf("\nfld.y;fld.x;fldc.y;fldc.x;sub.y;sub.x;subc.y;subc.x;idfield;idsub;field;"
-  //        "subdata\n");
 
-  dbdbg.create(vsubdata);
+  // центрированное субполе [-sz0/2..sz0/2) включая точки которые ему не
+  // принадлежат
+  int2 subc;
+
+  // не центрированное субполе [0..sz0) включая точки которые ему не принадлежат
+  int2 sub;
+
+  int2 flds; // shifted field
+
   for(fld.y = 0; fld.y < szfield; fld.y++) {
     flds.y = (szfield + fld.y + shift.y) % szfield;
     fldc.y = flds.y - szfield / 2;
