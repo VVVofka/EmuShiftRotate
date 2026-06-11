@@ -1,10 +1,12 @@
 #include "NoShared/rotate.h"
+#include <array>
 #include <assert.h>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
 
+using std::array;
 using std::vector;
 typedef vector<uint64_t> u64vector;
 typedef vector<int2> ivector;
@@ -271,8 +273,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
   // emulation of shared memory
   vector<u64vector> vshared(gridDim.x * gridDim.y);
-  vsrcshmem.resize(vshared.size());         // sources
-  vfld_base0.resize(gridDim.x * gridDim.y); // single variable in cuda
+  vector<array<int2, 4>> vshared_bounds(gridDim.x *
+                                        gridDim.y); // for get min max
+  vsrcshmem.resize(vshared.size());                 // sources
+  vfld_base0.resize(gridDim.x * gridDim.y);         // single variable in cuda
 
   constexpr int szshall = wszshared * wszshared;
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++)
@@ -291,7 +295,39 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
   for(blockIdx.y = 0; blockIdx.y < gridDim.y; blockIdx.y++) {
     for(blockIdx.x = 0; blockIdx.x < gridDim.x; blockIdx.x++) {
       int idblock = int(blockIdx.y * gridDim.x + blockIdx.x);
-      u64vector &s_sub = vshared[idblock]; // shared memory for block
+      u64vector &s_sub = vshared[idblock]; // current shared memory for block
+      array<int2, 4> &s_bounds = vshared_bounds[idblock];
+
+      // find corners of the block
+      for(int corner = 0; corner < 4; corner++) {
+        int x = (blockIdx.x * wszblock + (corner & 1) * wszblock) * 8 - 1;
+        int y = (blockIdx.y * wszblock + (corner >> 1) * wszblock) * 8 - 1;
+
+        int2 c = {x - hszfld, y - hszfld};
+        int2 shc = {c.x - shift.x, c.y - shift.y};
+        int2 shcwr = wrap_toroid0(shc, szfld);
+        s_bounds[corner] = rotate_device(shcwr, d_rotates);
+      }
+      // synchronize threads in cuda  __syncthreads(); there
+
+      // get min max of the block
+      int bound_min = s_bounds[0], bound_max = s_bounds[0];
+      for(int corner = 1; corner < 4; corner++) {
+        bound_min = min(bound_min, s_bounds[corner]);
+        bound_max = max(bound_max, s_bounds[corner]);
+      }
+      assert(bound_max.x - bound_min.x < szshared);
+      assert(bound_max.y - bound_min.y < szshared);
+
+      int2 wbasemin = floor8(wbound_min) / 8;
+      int2 wbasemax = floor8(wbound_max) / 8; 
+      for(int wy = wbasemin.y; wy <= wbasemax.y; wy++) {
+        for(int wx = wbasemin.x; wx <= wbasemax.x; wx++) {
+          // TODO: stop
+        }
+      }
+      int2 base = {basemin.x - szblock, basemin.y - szblock};
+      int2 base_wr = wrap_toroid0(base, szfld);
 
       // center of block (cob) in words
       int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
