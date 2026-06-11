@@ -27,24 +27,18 @@ uint32_t morton_encode(int x, int y) {
   return part1by1_32((uint32_t)x) | (part1by1_32((uint32_t)y) << 1);
 } // --------------------------------------------------------------------------
 
-void DbDbg::create(const std::vector<uint64_t> &v_subdata) {
-  wsz0 = int(sqrt(static_cast<double>(v_subdata.size())));
-  wszfield = sz0 * 3 / 2;
-  sz0 = sz0 * 8;
-  szfield = szfield * 8;
-  vrows.resize(sz0 * sz0);
+std::vector<int> DbDbg::convert_subdata(const std::vector<uint64_t> &v_subdata) {
+  int sz0 = 8 * int(sqrt(static_cast<double>(v_subdata.size())));
+  std::vector<int> v(sz0 * sz0);
 
   for(int y = 0; y < sz0; y++) {
     for(int x = 0; x < sz0; x++) {
       int i = y * sz0 + x;
       int z = morton_encode(x, y);
-      RowDbDbg &r = vrows[i];
-      r.id_subdata_morton = z;
-      r.subdata.id = i;
-      r.subdata = {x, y};
-      r.val = uint32_t(v_subdata[z / 64] >> (z % 64)) & 1;
+      v[i] = uint32_t(v_subdata[z / 64] >> (z % 64)) & 1;
     }
   }
+  return v;
 } // --------------------------------------------------------------------------
 void DbDbg::create(const std::vector<int> &v_subdata) {
   sz0 = int(sqrt(static_cast<double>(v_subdata.size())));
@@ -118,20 +112,20 @@ RowDbDbg *DbDbg::find_by_field(int x, int y) {
   return nullptr;
 } // --------------------------------------------------------------------------
 
-RowDbDbg *DbDbg::find_by_b(int x, int y) {
-  assert(x >= 0 && x < szfield);
-  assert(y >= 0 && y < szfield);
-  for(RowDbDbg &r : vrows)
-    if(r.b.x == x && r.b.y == y)
-      return &r;
-  return nullptr;
-} // --------------------------------------------------------------------------
-
 RowDbDbg *DbDbg::find_by_a(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
     if(r.a.x == x && r.a.y == y)
+      return &r;
+  return nullptr;
+} // --------------------------------------------------------------------------
+
+RowDbDbg *DbDbg::find_by_b(int x, int y) {
+  assert(x >= 0 && x < szfield);
+  assert(y >= 0 && y < szfield);
+  for(RowDbDbg &r : vrows)
+    if(r.b.x == x && r.b.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------

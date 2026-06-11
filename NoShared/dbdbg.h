@@ -66,7 +66,7 @@ public:
 
   /// @brief fill vrows: subdata, id_subdata_morton, val
   /// @param v_subdata 1 бит/ячейка. Код Мортона
-  void create(const std::vector<uint64_t> &v_subdata);
+  static std::vector<int> convert_subdata(const std::vector<uint64_t> &v_subdata);
 
   /// @brief fill vrows: subdata, id_subdata_morton, val
   /// @param v_subdata 1 значение/ячейка, код Мортона
