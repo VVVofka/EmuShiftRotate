@@ -1,6 +1,20 @@
 #include "dbdbg.h"
 #include <cassert>
 
+static int2 rotate(int2 sub, float2 k) {
+  int idx1 = (int)roundf(k.x * sub.y);
+  int2 fld0 = {sub.x + idx1, sub.y};
+
+  // int idy2 = truncf(k.y * fld0.x);
+  int idy2 = (int)roundf(k.y * fld0.x);
+  int2 fld1 = {fld0.x, fld0.y + idy2};
+
+  int idx3 = (int)roundf(k.x * fld1.y);
+  int2 fld2 = {fld1.x + idx3, fld1.y};
+
+  return fld2;
+} // --------------------------------------------------------------------------
+
 static uint32_t part1by1_32(uint32_t x) {
   x &= 0x0000FFFF;
   x = (x | (x << 8)) & 0x00FF00FF;
@@ -49,9 +63,38 @@ void DbDbg::create(const std::vector<int> &v_subdata) {
       r.id_subdata_morton = z;
       r.subdata.xy = sub;
       r.val = v_subdata[i];
-      r.a.xy = {x - sz0 / 2, y - sz0 / 2};
+      r.a = {x - sz0 / 2, y - sz0 / 2};
     }
   }
+} // --------------------------------------------------------------------------
+std::vector<int> DbDbg::push(float angle, int2 shift,
+                             const std::vector<int> &vsubdata) {
+  int sz0 = int(sqrt(static_cast<double>(vsubdata.size())));
+  int szfield = sz0 * 3 / 2;
+  std::vector<int> vfield(szfield * szfield, -1);
+  float rad = float(angle * (3.14159265358979323846 / 180.0));
+  float2 d_rotate = {float(tan(rad) * (1 - sqrt(2))),
+                     float(sin(rad * 2) / sqrt(2))};
+  for(int y = 0; y < sz0; y++) {
+    for(int x = 0; x < sz0; x++) {
+      int i = y * sz0 + x;
+      RowDbDbg &r = vrows[i];
+      r.b = rotate(r.a, d_rotate);
+      r.c = {r.b.x - shift.x, r.b.y - shift.y};
+      r.d = r.c;
+      if(r.d.x < szfield / 2)
+        r.d.x += szfield;
+      if(r.d.x >= szfield / 2)
+        r.d.x -= szfield;
+      if(r.d.y < szfield / 2)
+        r.d.y += szfield;
+      if(r.d.y >= szfield / 2)
+        r.d.y -= szfield;
+      r.e = {r.d.x + shift.x, r.d.y + shift.y};
+      r.field.xy = {r.d.x + szfield / 2, r.d.y + szfield / 2};
+    }
+  } // for(int y = 0; y < sz0; y++)
+  return vfield;
 } // --------------------------------------------------------------------------
 RowDbDbg DbDbg::get_row(int id) {
   assert(id >= 0 && id < sz0 * sz0);
@@ -75,27 +118,11 @@ RowDbDbg *DbDbg::find_by_field(int x, int y) {
   return nullptr;
 } // --------------------------------------------------------------------------
 
-RowDbDbg *DbDbg::find_by_b(int id) {
-  assert(id >= 0 && id < szfield * szfield);
-  for(RowDbDbg &r : vrows)
-    if(r.b.id == id)
-      return &r;
-  return nullptr;
-} // --------------------------------------------------------------------------
-
 RowDbDbg *DbDbg::find_by_b(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
-    if(r.b.xy.x == x && r.b.xy.y == y)
-      return &r;
-  return nullptr;
-} // --------------------------------------------------------------------------
-
-RowDbDbg *DbDbg::find_by_a(int id) {
-  assert(id >= 0 && id < szfield * szfield);
-  for(RowDbDbg &r : vrows)
-    if(r.a.id == id)
+    if(r.b.x == x && r.b.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------
@@ -104,7 +131,7 @@ RowDbDbg *DbDbg::find_by_a(int x, int y) {
   assert(x >= 0 && x < szfield);
   assert(y >= 0 && y < szfield);
   for(RowDbDbg &r : vrows)
-    if(r.a.xy.x == x && r.a.xy.y == y)
+    if(r.a.x == x && r.a.y == y)
       return &r;
   return nullptr;
 } // --------------------------------------------------------------------------

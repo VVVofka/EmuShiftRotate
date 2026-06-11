@@ -1,7 +1,7 @@
 #pragma once
+#include "emu_vector_types.h"
 #include <cstdint>
 #include <vector>
-#include "emu_vector_types.h"
 
 struct IdXY {
   int id = -1;
@@ -28,27 +28,27 @@ struct RowDbDbg {
   // push: result of center(subdata)
   // pull: result of rotate(b + angle)
   // centered, [-sz0/2, sz0/2)
-  IdXY a;
+  int2 a;
 
   // push: result of rotate(a - angle)
   // pull: result of of wrapc(e, szfield)
   // centered [-sz0/sqrt(2), sz0/sqrt(2))
-  IdXY b;  
+  int2 b;
 
   // push: result of b - shift
   // pull: not used
   // centered
-  IdXY c;
+  int2 c;
 
   // push: result of wrapc(c, szfield)
   // pull: result of center(field)
   // centered
-  IdXY d;
+  int2 d;
 
   // push(write): result of d + shift
   // pull(read): result of d + shift
   // centered
-  IdXY e;
+  int2 e;
 
   // push: result decenter(d)
   // pull: source
@@ -72,16 +72,38 @@ public:
   /// @param v_subdata 1 значение/ячейка, код Мортона
   void create(const std::vector<int> &v_subdata);
 
+  /// @brief Помещает vsubdata в выходное поле vfield с наклоном и сдвигом
+  /// относительно центра
+  /// @param angle угол поворота в градусах [-45, 45]
+  /// @param shift сдвиг в выходном поле [-szfield/2, szfield/2)
+  /// @param vsubdata входное поле размером sz0*sz0, где sz0=2^N
+  /// @return vfield: выходное поле размером szfield*szfield, где
+  /// szfield=1.5*sz0
+  std::vector<int> push(float angle, int2 shift,
+                        const std::vector<int> &vsubdata);
+
   RowDbDbg get_row(int id);
   RowDbDbg operator[](int id) { return get_row(id); }
 
   // find row
   RowDbDbg *find_by_field(int id);
   RowDbDbg *find_by_field(int x, int y);
-  RowDbDbg *find_by_b(int id);
-  RowDbDbg *find_by_b(int x, int y);
-  RowDbDbg *find_by_a(int id);
+
   RowDbDbg *find_by_a(int x, int y);
+  RowDbDbg *find_by_a(int2 xy){return find_by_a(xy.x, xy.y);};
+
+  RowDbDbg *find_by_b(int x, int y);
+  RowDbDbg *find_by_b(int2 xy){return find_by_b(xy.x, xy.y);};
+
+  RowDbDbg *find_by_c(int x, int y);
+  RowDbDbg *find_by_c(int2 xy){return find_by_c(xy.x, xy.y);};
+
+  RowDbDbg *find_by_d(int x, int y);
+  RowDbDbg *find_by_d(int2 xy){return find_by_d(xy.x, xy.y);};
+
+  RowDbDbg *find_by_e(int x, int y);
+  RowDbDbg *find_by_e(int2 xy){return find_by_e(xy.x, xy.y);};
+
   RowDbDbg *find_by_subdata(int id_morton);
   RowDbDbg *find_by_subdata(int x, int y);
 }; // --------------------------------------------------------------------------
