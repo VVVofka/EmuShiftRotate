@@ -465,13 +465,16 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                rotc.y >= hsz0)
               continue;
 
-            int2 shr = {rotc.x + hsz0, shr_raw.y + szshared};
+            int2 shr = {rotc.x + hsz0, rotc.y + hsz0};
             int2 wshr = {shr.x / 8, shr.y / 8};
-
-            if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
-               wshr.y >= wszshared)
-              continue;
-            int idwshared = wshr.y * wszshared + wshr.x;
+            int2 dw = {wshr.x - base.x, wshr.y - base.y};
+            if(dw.x < 0)
+              dw.x += wszfld;
+            if(dw.y < 0)
+              dw.y += wszfld;
+            assert(dw.x <= wszshared);
+            assert(dw.y <= wszshared);
+            int idwshared = dw.y * wszshared + dw.x;
             uint64_t val_shared = s_sub[idwshared];
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
