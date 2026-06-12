@@ -311,71 +311,105 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
       // synchronize threads in cuda  __syncthreads(); there
 
       // get min max of the block
-      int bound_min = s_bounds[0], bound_max = s_bounds[0];
-      for(int corner = 1; corner < 4; corner++) {
-        bound_min = min(bound_min, s_bounds[corner]);
-        bound_max = max(bound_max, s_bounds[corner]);
-      }
-      assert(bound_max.x - bound_min.x < szshared);
-      assert(bound_max.y - bound_min.y < szshared);
+      int2 boundc_min = {min(s_bounds[0].x, s_bounds[2].x),
+                         min(s_bounds[0].y, s_bounds[1].y)};
+      int2 boundc_max = {max(s_bounds[3].x, s_bounds[1].x),
+                         max(s_bounds[3].y, s_bounds[2].y)};
+      assert(boundc_max.x - boundc_min.x < szshared);
+      assert(boundc_max.y - boundc_min.y < szshared);
 
-      int2 wbasemin = floor8(wbound_min) / 8;
-      int2 wbasemax = floor8(wbound_max) / 8; 
-      for(int wy = wbasemin.y; wy <= wbasemax.y; wy++) {
-        for(int wx = wbasemin.x; wx <= wbasemax.x; wx++) {
-          // TODO: stop
-        }
-      }
-      int2 base = {basemin.x - szblock, basemin.y - szblock};
-      int2 base_wr = wrap_toroid0(base, szfld);
-
-      // center of block (cob) in words
-      int2 wcob = {(int)blockIdx.x * wszblock + wszblock / 2,
-                   (int)blockIdx.y * wszblock + wszblock / 2};
-
-      int cobx = wcob.x * 8 + shift.x;
-      int coby = wcob.y * 8 + shift.y;
-      int2 cobc = {cobx - hszfld, coby - hszfld};
-      cobc = wrap_toroid0(cobc, szfld); // qwen
-
-      // qwen
-      int2 cobrotc = rotate_device(cobc, d_rotates);
-      int2 cobrotc_floor = floor8({cobrotc.x + 4, cobrotc.y + 4});
-      int2 basec = {cobrotc_floor.x - szblock, cobrotc_floor.y - szblock};
-
-      vfld_base0[idblock] = basec;
-
-      // DEBUG: Check if shared memory covers all possible rotc values
-      // For rotc in [-hsz0, hsz0), we need shr in [-szblock, szblock)
-      // But wrap_relative can produce values in [-sz0, sz0) which is much
-      // larger
-      int2 wbasec = {floor8(basec.x) / 8, floor8(basec.y) / 8};
-
-      // For debugging: print block 2 base
-      if(idblock == 2) {
-        printf("DEBUG block 2: wcob:(%d,%d) cobc:(%d,%d) cobrotc:(%d,%d) "
-               "basec:(%d,%d) wbasec:(%d,%d)\n",
-               wcob.x, wcob.y, cobc.x, cobc.y, cobrotc.x, cobrotc.y, basec.x,
-               basec.y, wbasec.x, wbasec.y);
-      }
+      int2 basec_min = floor8(boundc_min);
+      int2 basec_max = floor8(boundc_max);
+      int2 wbasec_min = {basec_min.x / 8, basec_min.y / 8};
+      int2 wbasec_max = {basec_max.x / 8, basec_max.y / 8};
+      int2 wszbase = {wbasec_max.x + 1 - wbasec_min.x,
+                      wbasec_max.y - wbasec_min.y};
+      assert(wszbase.x <= wszshared);
+      assert(wszbase.y <= wszshared);
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
-          // fill shared memory. 4 values per thread
-          for(int j = 0; j < 4; j++) {
-            int2 wshared = {int(threadIdx.x) * 2 + j % 2,
-                            int(threadIdx.y) * 2 + j / 2};
-            int2 wsubc_cart = {wbasec.x + wshared.x, wbasec.y + wshared.y};
+          int widshared_y = threadIdx.y;
+          if(widshared_y < wszbase.y) {
+            int wcy = widshared_y + wbasec_min.y;
+            if(wcy < hwszfld)
+              wcy += hwszfld;
+            if(wcy >= hwszfld)
+              wcy -= hwszfld;
 
-            // toroidal wrap в координатах subdata относительно центра
-            wsubc_cart = wrap_toroid0(wsubc_cart, sz0 / 8);
+            // y; x
+            int widshared_x = threadIdx.x;
+            if(widshared_x < wszbase.x) {
+              int wcx = widshared_x + wbasec_min.x;
+              if(wcx < hwszfld)
+                wcx += hwszfld;
+              if(wcx >= hwszfld)
+                wcx -= hwszfld;
+              if(wcx >= -hwsz0 && wcx < hwsz0 && wcy >= -hwsz0 && wcy < hwsz0) {
+                int2 cart = {wcx + hwsz0, wcy + hwsz0};
+                auto idw_sub_morton = morton_encode(cart);
+                int widshared = widshared_y * wszshared + widshared_x;
+                s_sub[widshared] = subdata[idw_sub_morton];
+              }
+            }
 
-            int2 wsub_cart = {wsubc_cart.x + hwsz0, wsubc_cart.y + hwsz0};
-            auto idw_sub_morton = morton_encode(wsub_cart);
-            int idshared = wshared.y * wszshared + wshared.x;
-            s_sub[idshared] = subdata[idw_sub_morton];
-            vsrcshmem[idblock][idshared] = wsub_cart;
-          } // for(int j = 0; j < 4; j++)
+            // y; alt-x
+            widshared_x += blockDim.x;
+            if(widshared_x < wszbase.x) {
+              int wcx = widshared_x + wbasec_min.x;
+              if(wcx < hwszfld)
+                wcx += hwszfld;
+              if(wcx >= hwszfld)
+                wcx -= hwszfld;
+              if(wcx >= -hwsz0 && wcx < hwsz0 && wcy >= -hwsz0 && wcy < hwsz0) {
+                int2 cart = {wcx + hwsz0, wcy + hwsz0};
+                auto idw_sub_morton = morton_encode(cart);
+                int widshared = widshared_y * wszshared + widshared_x;
+                s_sub[widshared] = subdata[idw_sub_morton];
+              }
+            }
+          }
+
+          widshared_y += blockDim.y;
+          if(widshared_y < wszbase.y) {
+            int wcy = widshared_y + wbasec_min.y;
+            if(wcy < hwszfld)
+              wcy += hwszfld;
+            if(wcy >= hwszfld)
+              wcy -= hwszfld;
+
+            // alt y; x
+            int widshared_x = threadIdx.x;
+            if(widshared_x < wszbase.x) {
+              int wcx = widshared_x + wbasec_min.x;
+              if(wcx < hwszfld)
+                wcx += hwszfld;
+              if(wcx >= hwszfld)
+                wcx -= hwszfld;
+              if(wcx >= -hwsz0 && wcx < hwsz0 && wcy >= -hwsz0 && wcy < hwsz0) {
+                int2 cart = {wcx + hwsz0, wcy + hwsz0};
+                auto idw_sub_morton = morton_encode(cart);
+                int widshared = widshared_y * wszshared + widshared_x;
+                s_sub[widshared] = subdata[idw_sub_morton];
+              }
+            }
+
+            // alt y; alt-x
+            widshared_x += blockDim.x;
+            if(widshared_x < wszbase.x) {
+              int wcx = widshared_x + wbasec_min.x;
+              if(wcx < hwszfld)
+                wcx += hwszfld;
+              if(wcx >= hwszfld)
+                wcx -= hwszfld;
+              if(wcx >= -hwsz0 && wcx < hwsz0 && wcy >= -hwsz0 && wcy < hwsz0) {
+                int2 cart = {wcx + hwsz0, wcy + hwsz0};
+                auto idw_sub_morton = morton_encode(cart);
+                int widshared = widshared_y * wszshared + widshared_x;
+                s_sub[widshared] = subdata[idw_sub_morton];
+              }
+            }
+          }
         } // threadIdx.x
       } // threadIdx.y
     } // blockIdx.x
@@ -395,8 +429,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
           int2 w = {(int)blockIdx.x * wszblock + (int)threadIdx.x,
                     (int)blockIdx.y * wszblock + (int)threadIdx.y};
           int idw = w.y * wszfld + w.x;
-          uint64_t tile_field =
-              field[idw]; // if don't overwrite bit then old value will be used
+          uint64_t tile_field = field[idw]; // if don't overwrite bit then old
+                                            // value will be used
           int2 id_bit0 = {w.x * 8, w.y * 8};
           // #pragma unroll
           for(int nbit = 0; nbit < 64; ++nbit) {
@@ -404,8 +438,9 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
             // NoShared uses: flds = (szfield + fld + shift) % szfield, then
-            // fldc = flds - szfield/2 Main uses: fld_shift = fld + shift, then
-            // fldc = fld_shift - hszfld These are equivalent for shift in
+            // fldc = flds - szfield/2 Main uses: fld_shift = fld + shift,
+            // then fldc = fld_shift - hszfld These are equivalent for shift
+            // in
             // [-szfield/2, szfield/2)
             int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
             int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
@@ -431,8 +466,8 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
             // Calculate shr_raw = rotc - base (without wrap)
             // If shr_raw is in the shared memory range [-szshared, szshared),
-            // use it directly If shr_raw wrapped around (via wrap_relative), it
-            // means the value is outside our shared memory region
+            // use it directly If shr_raw wrapped around (via wrap_relative),
+            // it means the value is outside our shared memory region
             int2 shr_raw = {rotc.x - base.x,
                             rotc.y - base.y}; // before wrap_relative
 
@@ -549,6 +584,30 @@ int emu(int sz0, int2 shift, float angle, float kfill = 1.0f,
 using namespace std;
 int main() {
   // return emu(32, {20,30}, 0.0f, 0.5f, true);
+  int T = 2;
+  int D = 8; // D <= 4 * T
+
+  int i = 0, j = 0;
+  for(int t = 0; t < T; t++) {
+    int n = 0;
+    j = t + (n++) * T;
+    if(j < D)
+      printf("%d t:%d n:%d j:%d\n", i++, t, n, j);
+
+    j = t + (n++) * T;
+    if(j < D)
+      printf("%d t:%d n:%d j:%d\n", i++, t, n, j);
+
+    j = t + (n++) * T;
+    if(j < D)
+      printf("%d t:%d n:%d j:%d\n", i++, t, n, j);
+
+    j = t + (n++) * T;
+    if(j < D)
+      printf("%d t:%d n:%d j:%d\n", i++, t, n, j);
+  }
+  return 0;
+
   srand(999);
   int sz0 = 32;
   while(sz0 <= 1024) {
