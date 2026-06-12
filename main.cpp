@@ -329,6 +329,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
 
       for(threadIdx.y = 0; threadIdx.y < blockDim.y; threadIdx.y++) {
         for(threadIdx.x = 0; threadIdx.x < blockDim.x; threadIdx.x++) {
+          // y
           int widshared_y = threadIdx.y;
           if(widshared_y < wszbase.y) {
             int wcy = widshared_y + wbasec_min.y;
@@ -345,6 +346,10 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                 wcx += hwszfld;
               if(wcx >= hwszfld)
                 wcx -= hwszfld;
+
+              if(threadIdx.x == 0 && threadIdx.y == 0)
+                vfld_base0[idblock] = {wcx, wcy};
+
               if(wcx >= -hwsz0 && wcx < hwsz0 && wcy >= -hwsz0 && wcy < hwsz0) {
                 int2 cart = {wcx + hwsz0, wcy + hwsz0};
                 auto idw_sub_morton = morton_encode(cart);
@@ -369,7 +374,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
               }
             }
           }
-
+          // alt y
           widshared_y += blockDim.y;
           if(widshared_y < wszbase.y) {
             int wcy = widshared_y + wbasec_min.y;
@@ -410,6 +415,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
               }
             }
           }
+
         } // threadIdx.x
       } // threadIdx.y
     } // blockIdx.x
@@ -437,16 +443,11 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
             int2 bit = {nbit & 7, nbit >> 3};
 
             int2 fld = {id_bit0.x + bit.x, id_bit0.y + bit.y};
-            // NoShared uses: flds = (szfield + fld + shift) % szfield, then
-            // fldc = flds - szfield/2 Main uses: fld_shift = fld + shift,
-            // then fldc = fld_shift - hszfld These are equivalent for shift
-            // in
-            // [-szfield/2, szfield/2)
-            int2 fld_shift = {fld.x + shift.x, fld.y + shift.y};
-            int2 fldc = {fld_shift.x - hszfld, fld_shift.y - hszfld};
-            fldc = wrap_toroid0(fldc, szfld);
+            int2 fldc = {fld.x - hszfld, fld.y - hszfld};
+            int2 fldc_shift = {fldc.x + shift.x, fldc.y + shift.y};
+            int2 fldc_wrap = wrap_toroid0(fldc_shift, szfld);
 
-            int2 rotc = rotate_device(fldc, d_rotates);
+            int2 rotc = rotate_device(fldc_wrap, d_rotates);
 
             bool err_dump = 0 && blockIdx.x == 2 && blockIdx.y == 1 &&
                             threadIdx.x == 1 && threadIdx.y == 1 && nbit == 7;
@@ -455,7 +456,7 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                      blockIdx.y, threadIdx.x, threadIdx.y, nbit);
               printf("fld:%d %d  fld_shift:%d %d  fldc:%d %d\nrotc:%d %d "
                      "[%d,%d)\n",
-                     fld.x, fld.y, fld_shift.x, fld_shift.y, fldc.x, fldc.y,
+                     fld.x, fld.y, fldc_shift.x, fldc_shift.y, fldc.x, fldc.y,
                      rotc.x, rotc.y, -hsz0, hsz0);
             }
             // rotc — проекция на subdata в центрированных координатах.
@@ -464,61 +465,17 @@ vector<u64vector> push(const u64vector &vsubdata, u64vector &vfield, int2 shift,
                rotc.y >= hsz0)
               continue;
 
-            // Calculate shr_raw = rotc - base (without wrap)
-            // If shr_raw is in the shared memory range [-szshared, szshared),
-            // use it directly If shr_raw wrapped around (via wrap_relative),
-            // it means the value is outside our shared memory region
-            int2 shr_raw = {rotc.x - base.x,
-                            rotc.y - base.y}; // before wrap_relative
-
-            // Check if shr_raw is in the shared memory range BEFORE wrapping
-            // shr_raw should be in [-szshared, szshared) for it to be covered
-            // by shared memory
-            if(shr_raw.x < -szshared || shr_raw.x >= szshared ||
-               shr_raw.y < -szshared || shr_raw.y >= szshared) {
-              // Value is outside shared memory region - skip
-              continue;
-            }
-
-            // Now shr_raw is in range, convert to positive coordinates for
-            // Morton encoding
-            int2 shr = {shr_raw.x + szshared, shr_raw.y + szshared};
+            int2 shr = {rotc.x + hsz0, shr_raw.y + szshared};
             int2 wshr = {shr.x / 8, shr.y / 8};
-
-            bool wshr_check = wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
-                              wshr.y >= wszshared;
-            if(wshr_check && (rotc.x >= -hsz0 && rotc.y >= -hsz0 &&
-                              rotc.x < hsz0 && rotc.y < hsz0)) {
-              // This should NOT happen - rotc is in bounds but wshr is out of
-              // shared memory range Print detailed error for block 2
-              int blk_id = blockIdx.y * gridDim.x + blockIdx.x;
-              if(blk_id == 2) {
-                printf("ERROR: blk_id=%d wshr out of bounds! rotc:(%d,%d) "
-                       "base:(%d,%d) shr:(%d,%d) wshr:(%d,%d) wszshared:%d\n",
-                       blk_id, rotc.x, rotc.y, base.x, base.y, shr.x, shr.y,
-                       wshr.x, wshr.y, wszshared);
-              }
-              continue;
-            }
-            if(err_dump)
-              printf("shr:%d %d  wshr:%d %d (%d)\n", shr.x, shr.y, wshr.x,
-                     wshr.y, wszshared);
 
             if(wshr.x < 0 || wshr.y < 0 || wshr.x >= wszshared ||
                wshr.y >= wszshared)
               continue;
-
-            if(err_dump)
-              printf("wshr check Ok\n");
-
             int idwshared = wshr.y * wszshared + wshr.x;
             uint64_t val_shared = s_sub[idwshared];
             uint32_t shift_bit = morton_encode(shr) & 63;
             uint32_t val_bit = uint32_t(val_shared >> shift_bit) & 1;
             replace_bit(tile_field, nbit, val_bit);
-            if(err_dump)
-              printf("idwshared:%d  val_shared:%zX  shift_bit:%d  val_bit:%d\n",
-                     idwshared, val_shared, shift_bit, val_bit);
           }
           field[idw] = tile_field;
         } // threadIdx.x
